@@ -173,6 +173,35 @@ func selectAll(state: inout EditorState) {
   state.selectionEnd = (lastLine, lastColumn)
 }
 
+func copySelection(state: inout EditorState) {
+  guard state.hasSelection, let selection = selectedText(from: state) else { return }
+  do {
+    try Clipboard.copy(selection)
+  } catch {
+    fputs("Copy failed: \(error)\n", stderr)
+  }
+}
+
+func cutSelection(state: inout EditorState) {
+  guard state.hasSelection, let selection = selectedText(from: state) else { return }
+  do {
+    try Clipboard.copy(selection)
+    deleteSelection(state: &state)
+  } catch {
+    fputs("Cut failed: \(error)\n", stderr)
+  }
+}
+
+func pasteClipboard(state: inout EditorState) {
+  do {
+    guard let pasted = try Clipboard.paste() else { return }
+    if pasted.isEmpty { return }
+    insertText(pasted, state: &state)
+  } catch {
+    fputs("Paste failed: \(error)\n", stderr)
+  }
+}
+
 func selectLineUp(state: inout EditorState) {
   if !state.hasSelection { state.startSelection() }
   if state.cursorLine > 0 {
@@ -304,3 +333,73 @@ func wordRange(in line: String, at column: Int) -> (start: Int, end: Int) {
   return (start, end)
 }
 
+private func selectedText(from state: EditorState) -> String? {
+  guard let startSel = state.selectionStart, let endSel = state.selectionEnd else { return nil }
+  let (start, end) = state.normalizeSelection(start: startSel, end: endSel)
+
+  let startLine = start.line
+  let endLine = end.line
+  guard startLine >= 0, endLine < state.buffer.count else { return nil }
+
+  if startLine == endLine {
+    let line = state.buffer[startLine]
+    let startColumn = min(start.column, line.count)
+    let endColumn = min(end.column, line.count)
+    if startColumn >= endColumn { return nil }
+    let startIndex = line.index(line.startIndex, offsetBy: startColumn)
+    let endIndex = line.index(line.startIndex, offsetBy: endColumn)
+    return String(line[startIndex..<endIndex])
+  }
+
+  var segments: [String] = []
+  let firstLine = state.buffer[startLine]
+  let firstStartIndex = firstLine.index(firstLine.startIndex, offsetBy: min(start.column, firstLine.count))
+  segments.append(String(firstLine[firstStartIndex...]))
+
+  if endLine - startLine > 1 {
+    for lineIndex in (startLine + 1)..<endLine {
+      segments.append(state.buffer[lineIndex])
+    }
+  }
+
+  let lastLine = state.buffer[endLine]
+  let lastEndIndex = lastLine.index(lastLine.startIndex, offsetBy: min(end.column, lastLine.count))
+  segments.append(String(lastLine[..<lastEndIndex]))
+
+  return segments.joined(separator: "\n")
+}
+
+private func insertText(_ text: String, state: inout EditorState) {
+  if state.hasSelection { deleteSelection(state: &state) }
+
+  let normalized = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+  let fragments = normalized.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+  guard !fragments.isEmpty else { return }
+
+  let currentLine = state.buffer[state.cursorLine]
+  let safeColumn = min(state.cursorColumn, currentLine.count)
+  let beforeCursor = String(currentLine.prefix(safeColumn))
+  let afterCursor = String(currentLine.dropFirst(safeColumn))
+
+  if fragments.count == 1 {
+    state.buffer[state.cursorLine] = beforeCursor + fragments[0] + afterCursor
+    state.cursorColumn = beforeCursor.count + fragments[0].count
+  } else {
+    state.buffer[state.cursorLine] = beforeCursor + fragments[0]
+    var insertIndex = state.cursorLine + 1
+    if fragments.count > 2 {
+      for fragment in fragments[1..<(fragments.count - 1)] {
+        state.buffer.insert(String(fragment), at: insertIndex)
+        insertIndex += 1
+      }
+    }
+    let lastFragment = fragments.last ?? ""
+    state.buffer.insert(lastFragment + afterCursor, at: insertIndex)
+    state.cursorLine = insertIndex
+    state.cursorColumn = lastFragment.count
+  }
+
+  state.clampCursor()
+  state.showCursor()
+}

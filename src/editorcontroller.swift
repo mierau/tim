@@ -60,6 +60,9 @@ enum EditorController {
         editorState.needsRedraw = true
         switch key {
         case 17: running = false
+        case 3: copySelection(state: &editorState)
+        case 24: cutSelection(state: &editorState)
+        case 22: pasteClipboard(state: &editorState)
         case 13, 10: insertNewline(state: &editorState)
         case 127, 8: backspace(state: &editorState)
         case 9: insertTab(state: &editorState)

@@ -5,14 +5,16 @@ The Mac-friendly command line text editor.
 ## Features
 - Clean simple interface.
 - Select text using Mac keyboard shortcuts.
+- Copy/paste/cut support through ctrl-c/v/x (reads and writes to system clipboard).
 - Use a mouse or trackpad to select with single, double, or triple-click selection.
 - Use a trackpad and scroll wheel to scroll long documents.
 - Proportional scrollbar you can drag to scroll around a document.
-- Line wrapping.
+- Automatic line wrapping.
 - Indentation preservation when moving to a new line.
 - Automatic detection of binary files.
-- Status footer with live line/column counts and selection summaries
+- Status footer with live line/column counts and selection summaries.
 - Looks great in with or without terminal colors.
+- Mac-like ctrl-q shortcut to quit.
 
 ## Installation
 1. Ensure Xcode command line tools or a Swift 5.9+ toolchain is installed.

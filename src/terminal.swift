@@ -49,6 +49,9 @@ struct Terminal {
   static let disableMouseTracking = "\(ESC)[?1006l\(ESC)[?1002l\(ESC)[?1000l"  // Disable mouse tracking
   static let cursorColorReset = "\(ESC)]112\(ESC)\\"  // Reset cursor color to default
 
+  private static var originalTermios: termios?
+  private static var rawModeActive = false
+
   private static func write(_ string: String) {
     let bytes = Array(string.utf8)
     bytes.withUnsafeBytes { buffer in
@@ -67,17 +70,27 @@ struct Terminal {
   }
 
   static func enableRawMode() {
-    var raw = termios()
-    tcgetattr(STDIN_FILENO, &raw)
-    raw.c_lflag &= ~UInt(ECHO | ICANON)
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw)
+    if rawModeActive { return }
+
+    var current = termios()
+    guard tcgetattr(STDIN_FILENO, &current) == 0 else { return }
+    originalTermios = current
+
+    var raw = current
+    raw.c_lflag &= ~tcflag_t(ECHO | ICANON | ISIG | IEXTEN)
+    raw.c_iflag &= ~tcflag_t(IXON | ICRNL)
+
+    if tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == 0 {
+      rawModeActive = true
+    }
   }
 
   static func disableRawMode() {
-    var cooked = termios()
-    tcgetattr(STDIN_FILENO, &cooked)
-    cooked.c_lflag |= UInt(ECHO | ICANON)
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &cooked)
+    guard rawModeActive else { return }
+    if var original = originalTermios {
+      tcsetattr(STDIN_FILENO, TCSAFLUSH, &original)
+    }
+    rawModeActive = false
   }
 
   static func getTerminalSize() -> (rows: Int, cols: Int) {

@@ -102,7 +102,8 @@ func drawEditor(state: inout EditorState) {
       let fragment = String(line[sliceStart..<sliceEnd])
       if vr.isFirst {
         let isActiveLine = !state.hasSelection && vr.lineIndex == state.cursorLine
-        let lineNumberColor = isActiveLine ? Terminal.pink : Terminal.grey
+        let isSelectedLine = lineIsSelected(lineIndex: vr.lineIndex, state: state)
+        let lineNumberColor = (isActiveLine || isSelectedLine) ? Terminal.pink : Terminal.grey
         print(lineNumberColor + String(format: "%4d", lineNum) + Terminal.reset + " ", terminator: "")
       } else {
         print(String(repeating: " ", count: 5), terminator: "")
@@ -172,7 +173,7 @@ private func makeStatusLine(state: EditorState) -> (text: String, color: String)
   let (start, end) = state.normalizeSelection(start: startSel, end: endSel)
   let lineCount = countSelectedLines(in: state, from: start, to: end)
   let characterCount = countSelectedCharacters(in: state, from: start, to: end)
-  return ("Lns \(lineCount), Chars \(characterCount)", Terminal.pink)
+  return ("Lns \(lineCount), Chars \(characterCount)", Terminal.grey)
 }
 
 private func countSelectedLines(in state: EditorState, from start: (line: Int, column: Int), to end: (line: Int, column: Int)) -> Int {
@@ -194,4 +195,16 @@ private func countSelectedCharacters(in state: EditorState, from start: (line: I
 
   let newlineCount = max(0, countSelectedLines(in: state, from: start, to: end) - 1)
   return total + newlineCount
+}
+
+private func lineIsSelected(lineIndex: Int, state: EditorState) -> Bool {
+  guard state.hasSelection, let startSel = state.selectionStart, let endSel = state.selectionEnd else {
+    return false
+  }
+  let (start, end) = state.normalizeSelection(start: startSel, end: endSel)
+  if start.line == end.line {
+    guard start.column != end.column else { return false }
+    return lineIndex == start.line
+  }
+  return lineIndex >= start.line && lineIndex <= end.line
 }
