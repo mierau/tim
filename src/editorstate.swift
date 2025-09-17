@@ -1,0 +1,132 @@
+import Foundation
+
+enum SelectionMode {
+  case none
+  case character(anchorLine: Int, anchorColumn: Int)
+  case word(anchorLine: Int, anchorStart: Int, anchorEnd: Int)
+  case line(anchorLine: Int)
+}
+
+struct EditorState {
+  var buffer: [String]
+  var cursorLine: Int
+  var cursorColumn: Int
+  var scrollOffset: Int
+  var visualScrollOffset: Int
+  var cursorVisible: Bool
+  var lastBlinkTime: Date
+  var lastClickTime: Date?
+  var lastClickLine: Int?
+  var lastClickColumn: Int?
+  var lastClickCount: Int
+  var selectionStart: (line: Int, column: Int)?
+  var selectionEnd: (line: Int, column: Int)?
+  var needsRedraw: Bool
+  var isDragging: Bool
+  var selectionMode: SelectionMode
+  var isScrollbarDragging: Bool
+  var pinCursorToView: Bool
+  var filePath: String?
+
+  var displayFilename: String {
+    if let filePath { return URL(fileURLWithPath: filePath).lastPathComponent }
+    return "untitled.txt"
+  }
+
+  init() {
+    self.buffer = [""]
+    self.cursorLine = 0
+    self.cursorColumn = 0
+    self.scrollOffset = 0
+    self.cursorVisible = true
+    self.lastBlinkTime = Date()
+    self.lastClickTime = nil
+    self.lastClickLine = nil
+    self.lastClickColumn = nil
+    self.lastClickCount = 0
+    self.selectionStart = nil
+    self.selectionEnd = nil
+    self.needsRedraw = true
+    self.isDragging = false
+    self.selectionMode = .none
+    self.visualScrollOffset = 0
+    self.isScrollbarDragging = false
+    self.pinCursorToView = true
+    self.filePath = nil
+  }
+
+  mutating func clampCursor() {
+    if buffer.isEmpty { buffer = [""] }
+    cursorLine = max(0, min(cursorLine, buffer.count - 1))
+    let lineLength = buffer[cursorLine].count
+    cursorColumn = max(0, min(cursorColumn, lineLength))
+  }
+
+  mutating func updateCursorBlink() {
+    if hasSelection {
+      if cursorVisible {
+        cursorVisible = false
+        needsRedraw = true
+      }
+      return
+    }
+    let now = Date()
+    if now.timeIntervalSince(lastBlinkTime) > 0.5 {
+      cursorVisible.toggle()
+      lastBlinkTime = now
+      needsRedraw = true
+    }
+  }
+
+  mutating func showCursor() {
+    if !hasSelection {
+      cursorVisible = true
+      lastBlinkTime = Date()
+      needsRedraw = true
+    }
+  }
+
+  var hasSelection: Bool { selectionStart != nil && selectionEnd != nil }
+
+  mutating func clearSelection() {
+    selectionStart = nil
+    selectionEnd = nil
+    showCursor()
+    selectionMode = .none
+  }
+
+  mutating func startSelection() {
+    selectionStart = (cursorLine, cursorColumn)
+    selectionEnd = (cursorLine, cursorColumn)
+    selectionMode = .character(anchorLine: cursorLine, anchorColumn: cursorColumn)
+  }
+
+  mutating func updateSelection() {
+    if selectionStart != nil { selectionEnd = (cursorLine, cursorColumn) }
+  }
+
+  func isPositionSelected(line: Int, column: Int) -> Bool {
+    guard let start = selectionStart, let end = selectionEnd else { return false }
+    let (startPos, endPos) = normalizeSelection(start: start, end: end)
+    if line < startPos.line || line > endPos.line { return false }
+    if line == startPos.line && line == endPos.line {
+      return column >= startPos.column && column < endPos.column
+    } else if line == startPos.line {
+      return column >= startPos.column
+    } else if line == endPos.line {
+      return column < endPos.column
+    } else {
+      return true
+    }
+  }
+
+  func normalizeSelection(start: (line: Int, column: Int), end: (line: Int, column: Int)) -> (
+    (line: Int, column: Int), (line: Int, column: Int)
+  ) {
+    if start.line < end.line || (start.line == end.line && start.column <= end.column) {
+      return (start, end)
+    } else {
+      return (end, start)
+    }
+  }
+}
