@@ -49,6 +49,23 @@ struct Terminal {
   static let disableMouseTracking = "\(ESC)[?1006l\(ESC)[?1002l\(ESC)[?1000l"  // Disable mouse tracking
   static let cursorColorReset = "\(ESC)]112\(ESC)\\"  // Reset cursor color to default
 
+  private static func write(_ string: String) {
+    let bytes = Array(string.utf8)
+    bytes.withUnsafeBytes { buffer in
+      guard let baseAddress = buffer.baseAddress else { return }
+      _ = Darwin.write(STDOUT_FILENO, baseAddress, buffer.count)
+    }
+  }
+
+  static func restoreState() {
+    write(disableMouseTracking)
+    write(cursorColorReset)
+    write(cursorRestoreDefault)
+    write(showCursor)
+    write(exitAltScreen)
+    disableRawMode()
+  }
+
   static func enableRawMode() {
     var raw = termios()
     tcgetattr(STDIN_FILENO, &raw)

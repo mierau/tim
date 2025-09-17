@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(Darwin)
+  import Darwin
+#endif
+
 enum EditorController {
   static func run() {
     var state = EditorState()
@@ -22,29 +26,27 @@ enum EditorController {
     var editorState = state
     var running = true
 
+    var sessionActive = false
+
     func cleanup() {
-      print(Terminal.disableMouseTracking, terminator: "")
-      print(Terminal.cursorColorReset, terminator: "")
-      print(Terminal.cursorRestoreDefault, terminator: "")
-      print(Terminal.showCursor, terminator: "")
-      print(Terminal.exitAltScreen, terminator: "")
-      Terminal.disableRawMode()
+      guard sessionActive else { return }
+      sessionActive = false
+      Terminal.restoreState()
     }
 
-    signal(SIGINT) { _ in
-      cleanup()
-      exit(0)
-    }
+    TerminalSignalGuard.install(cleanup: cleanup)
+
     signal(SIGTSTP) { _ in }
 
     Terminal.enableRawMode()
+    sessionActive = true
     print(Terminal.enterAltScreen, terminator: "")
     print(Terminal.showCursor, terminator: "")
     print(Terminal.cursorSteadyBar, terminator: "")
     print(Terminal.cursorColorPink, terminator: "")
     print(Terminal.enableMouseTracking, terminator: "")
 
-    defer { cleanup() }
+    defer { TerminalSignalGuard.performCleanup() }
 
     while running {
       editorState.updateCursorBlink()
@@ -90,6 +92,51 @@ enum EditorController {
         }
       }
       usleep(16000)
+    }
+  }
+}
+
+private enum TerminalSignalGuard {
+  private static var installed = false
+  private static var cleanup: (() -> Void)?
+  private static var cleanedUp = false
+
+  private static let atexitHandler: @convention(c) () -> Void = {
+    performCleanup()
+  }
+
+  private static let signalHandler: @convention(c) (Int32) -> Void = { sig in
+    performCleanup()
+    switch sig {
+    case SIGINT, SIGTERM, SIGQUIT:
+      _Exit(128 + sig)
+    default:
+      signal(sig, SIG_DFL)
+      raise(sig)
+    }
+  }
+
+  static func install(cleanup: @escaping () -> Void) {
+    self.cleanup = cleanup
+    cleanedUp = false
+
+    if !installed {
+      installed = true
+      atexit(atexitHandler)
+      registerSignals()
+    }
+  }
+
+  static func performCleanup() {
+    guard !cleanedUp else { return }
+    cleanedUp = true
+    cleanup?()
+  }
+
+  private static func registerSignals() {
+    let signalsToHandle: [Int32] = [SIGINT, SIGTERM, SIGQUIT, SIGABRT, SIGILL, SIGSEGV, SIGBUS, SIGFPE]
+    for sig in signalsToHandle {
+      signal(sig, signalHandler)
     }
   }
 }
