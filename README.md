@@ -23,7 +23,7 @@ The Mac-friendly command line text editor.
    ```sh
    swift build
    ```
-   Add `-c release` for optimized profiling builds.
+   Add `-c release` for a release optimized build.
 
 ## Usage
 Open `tim` without arguments to start with an empty buffer:

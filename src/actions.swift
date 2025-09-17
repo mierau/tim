@@ -306,31 +306,40 @@ func wordRange(in line: String, at column: Int) -> (start: Int, end: Int) {
   let chars = Array(line)
   let targetChar = chars[clampedColumn]
   let isWord = isWordCharacter(targetChar)
-  var start = clampedColumn
-  var end = clampedColumn + 1
-  var i = clampedColumn - 1
-  while i >= 0 {
-    let c = chars[i]
-    if isWord {
-      if isWordCharacter(c) { start = i; i -= 1; continue }
-    } else {
-      if !isWordCharacter(c) && !c.isWhitespace { start = i; i -= 1; continue }
-      if targetChar.isWhitespace && c.isWhitespace { start = i; i -= 1; continue }
+  if targetChar.isWhitespace {
+    var start = clampedColumn
+    var end = clampedColumn + 1
+    var i = clampedColumn - 1
+    while i >= 0, chars[i].isWhitespace {
+      start = i
+      i -= 1
     }
-    break
-  }
-  i = clampedColumn + 1
-  while i < chars.count {
-    let c = chars[i]
-    if isWord {
-      if isWordCharacter(c) { end = i + 1; i += 1; continue }
-    } else {
-      if !isWordCharacter(c) && !c.isWhitespace { end = i + 1; i += 1; continue }
-      if targetChar.isWhitespace && c.isWhitespace { end = i + 1; i += 1; continue }
+    i = clampedColumn + 1
+    while i < chars.count, chars[i].isWhitespace {
+      end = i + 1
+      i += 1
     }
-    break
+    return (start, end)
   }
-  return (start, end)
+
+  if isWord {
+    var start = clampedColumn
+    var end = clampedColumn + 1
+    var i = clampedColumn - 1
+    while i >= 0, isWordCharacter(chars[i]) {
+      start = i
+      i -= 1
+    }
+    i = clampedColumn + 1
+    while i < chars.count, isWordCharacter(chars[i]) {
+      end = i + 1
+      i += 1
+    }
+    return (start, end)
+  }
+
+  // Symbols and punctuation: select only the clicked character
+  return (clampedColumn, clampedColumn + 1)
 }
 
 private func selectedText(from state: EditorState) -> String? {

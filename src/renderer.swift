@@ -85,9 +85,20 @@ func drawEditor(state: inout EditorState) {
   // Header
   let filename = state.displayFilename
   let termWidth = termSize.cols
-  let padding = max(0, (termWidth - filename.count) / 2)
-  let centeredHeader = String(repeating: " ", count: padding) + filename
-  print(Terminal.bold + Terminal.green + centeredHeader + Terminal.reset)
+  let decoratedName = " \(filename) "
+  let availableWidth = max(0, termWidth - decoratedName.count)
+  let leftCount = availableWidth / 2
+  let rightCount = availableWidth - leftCount
+  // Use a contiguous double-line box drawing glyph; triple-line glyphs like U+2261 introduce spacing.
+  let barCharacter = "\u{2550}"
+  let leftDecoration = leftCount > 0
+    ? Terminal.grey + String(repeating: barCharacter, count: leftCount) + Terminal.reset
+    : ""
+  let rightDecoration = rightCount > 0
+    ? Terminal.grey + String(repeating: barCharacter, count: rightCount) + Terminal.reset
+    : ""
+  let nameSegment = Terminal.bold + Terminal.green + decoratedName + Terminal.reset
+  print(leftDecoration + nameSegment + rightDecoration)
 
   // Body
   let startV = max(0, min(vScroll, max(0, visualRows.count - 1)))

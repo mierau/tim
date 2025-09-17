@@ -45,13 +45,13 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
         }
       }
       // Text area click
-      state.isScrollbarDragging = false
       let vrows = buildVisualRows(state: state, contentWidth: contentWidth)
       let vIndex = min(state.visualScrollOffset + localRow, max(0, vrows.count - 1))
       let vr = vrows[vIndex]
       let targetLine = vr.lineIndex
       let line = state.buffer[targetLine]
       let targetColumn = min(vr.start + editorCol, line.count)
+      state.isScrollbarDragging = false
       if event.isPress {
         state.pinCursorToView = false
         let now = Date()
@@ -105,7 +105,7 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
       } else {
         if state.isDragging {
           state.isDragging = false
-          if let start = state.selectionStart,
+          if case .character? = selectionModeForClearing(state), let start = state.selectionStart,
             start.line == targetLine && start.column == targetColumn
           {
             state.clearSelection()
@@ -230,5 +230,14 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
       state.pinCursorToView = false
       state.needsRedraw = true
     }
+  }
+}
+
+private func selectionModeForClearing(_ state: EditorState) -> SelectionMode? {
+  switch state.selectionMode {
+  case .character:
+    return state.selectionMode
+  default:
+    return nil
   }
 }
