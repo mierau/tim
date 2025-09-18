@@ -53,7 +53,7 @@ struct UndoSnapshot {
     state.visualScrollOffset = visualScrollOffset
     state.needsRedraw = true
     state.pinCursorToView = true
-    state.refreshDirtyFlag()
+    state.bufferDidChange()
   }
 }
 
@@ -200,11 +200,20 @@ struct EditorState {
 
   mutating func refreshDirtyFlag() {
     isDirty = buffer != savedBuffer
-    markLayoutDirty()
   }
 
   mutating func markLayoutDirty() {
     layoutGeneration &+= 1
-    layoutCache.invalidate()
+    layoutCache.invalidateAll()
+  }
+
+  mutating func bufferDidChange(lineRange: Range<Int>? = nil) {
+    layoutGeneration &+= 1
+    if let range = lineRange {
+      layoutCache.invalidateLines(in: range)
+    } else {
+      layoutCache.invalidateAll()
+    }
+    refreshDirtyFlag()
   }
 }

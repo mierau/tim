@@ -9,29 +9,113 @@ struct VisualRow {
 }
 
 struct LayoutCache {
-  private(set) var cachedRows: [VisualRow] = []
-  private var cachedWidth: Int = -1
-  private var cachedGeneration: Int = -1
+  private struct LineSpan {
+    var start: Int
+    var count: Int
+  }
 
-  mutating func invalidate() {
-    cachedGeneration = -1
+  private var contentWidth: Int = -1
+  private var rows: [VisualRow] = []
+  private var spans: [LineSpan] = []
+  private var dirtyLines: Set<Int> = []
+
+  mutating func invalidateAll() {
+    rows.removeAll(keepingCapacity: true)
+    spans.removeAll(keepingCapacity: true)
+    dirtyLines.removeAll(keepingCapacity: true)
+    contentWidth = -1
+  }
+
+  mutating func invalidateLines(in range: Range<Int>) {
+    if range.isEmpty { return }
+    for line in range {
+      dirtyLines.insert(line)
+    }
   }
 
   mutating func visualRows(for state: EditorState, contentWidth: Int) -> [VisualRow] {
     guard contentWidth > 0 else {
-      cachedRows = []
-      cachedWidth = contentWidth
-      cachedGeneration = state.layoutGeneration
-      return cachedRows
+      invalidateAll()
+      return []
     }
 
-    if cachedWidth != contentWidth || cachedGeneration != state.layoutGeneration {
-      cachedRows = computeVisualRows(state: state, contentWidth: contentWidth)
-      cachedWidth = contentWidth
-      cachedGeneration = state.layoutGeneration
+    if self.contentWidth != contentWidth || spans.count != state.buffer.count {
+      rebuildAll(state: state, width: contentWidth)
+      return rows
     }
-    return cachedRows
+
+    if !dirtyLines.isEmpty {
+      rebuildDirtyLines(state: state, width: contentWidth)
+    }
+
+    return rows
   }
+
+  private mutating func rebuildAll(state: EditorState, width: Int) {
+    rows.removeAll(keepingCapacity: true)
+    spans.removeAll(keepingCapacity: true)
+    spans.reserveCapacity(state.buffer.count)
+
+    var startIndex = 0
+    for (lineIndex, line) in state.buffer.enumerated() {
+      let lineRows = makeRows(for: line, lineIndex: lineIndex, width: width)
+      rows.append(contentsOf: lineRows)
+      spans.append(LineSpan(start: startIndex, count: lineRows.count))
+      startIndex += lineRows.count
+    }
+
+    contentWidth = width
+    dirtyLines.removeAll(keepingCapacity: true)
+  }
+
+  private mutating func rebuildDirtyLines(state: EditorState, width: Int) {
+    let sortedLines = dirtyLines.sorted()
+    dirtyLines.removeAll(keepingCapacity: true)
+
+    for lineIndex in sortedLines {
+      guard lineIndex >= 0, lineIndex < state.buffer.count, lineIndex < spans.count else {
+        rebuildAll(state: state, width: width)
+        return
+      }
+
+      let oldSpan = spans[lineIndex]
+      let newRows = makeRows(for: state.buffer[lineIndex], lineIndex: lineIndex, width: width)
+
+      let delta = newRows.count - oldSpan.count
+
+      if oldSpan.count > 0 {
+        rows.removeSubrange(oldSpan.start..<(oldSpan.start + oldSpan.count))
+      }
+      if !newRows.isEmpty {
+        rows.insert(contentsOf: newRows, at: oldSpan.start)
+      }
+
+      spans[lineIndex] = LineSpan(start: oldSpan.start, count: newRows.count)
+
+      if delta != 0 {
+        for idx in (lineIndex + 1)..<spans.count {
+          spans[idx].start += delta
+        }
+      }
+    }
+  }
+}
+
+private func makeRows(for line: String, lineIndex: Int, width: Int) -> [VisualRow] {
+  let cuts = wrapLineIndices(line, width: width)
+  if cuts.count < 2 {
+    return [VisualRow(lineIndex: lineIndex, start: 0, end: 0, isFirst: true, isEndOfLine: true)]
+  }
+  var result: [VisualRow] = []
+  result.reserveCapacity(max(1, cuts.count - 1))
+  for ci in 0..<(cuts.count - 1) {
+    let start = cuts[ci]
+    let end = cuts[ci + 1]
+    let isFirst = (ci == 0)
+    let isEnd = (ci == cuts.count - 2)
+    result.append(VisualRow(lineIndex: lineIndex, start: start, end: end, isFirst: isFirst, isEndOfLine: isEnd))
+  }
+  return result
 }
 
 func wrapLineIndices(_ line: String, width: Int) -> [Int] {
@@ -90,29 +174,6 @@ func wrapLineIndices(_ line: String, width: Int) -> [Int] {
   if indices.last != chars.count { indices.append(chars.count) }
   if indices.count < 2 { indices.append(0) }
   return indices
-}
-
-func computeVisualRows(state: EditorState, contentWidth: Int) -> [VisualRow] {
-  var rows: [VisualRow] = []
-  for (li, line) in state.buffer.enumerated() {
-    let cuts = wrapLineIndices(line, width: contentWidth)
-    if cuts.count < 2 {
-      rows.append(VisualRow(lineIndex: li, start: 0, end: 0, isFirst: true, isEndOfLine: true))
-      continue
-    }
-    for ci in 0..<(cuts.count - 1) {
-      let start = cuts[ci]
-      let end = cuts[ci + 1]
-      let isFirst = (ci == 0)
-      let isEnd = (ci == cuts.count - 2)
-      rows.append(
-        VisualRow(lineIndex: li, start: start, end: end, isFirst: isFirst, isEndOfLine: isEnd))
-    }
-  }
-  if rows.isEmpty {
-    rows.append(VisualRow(lineIndex: 0, start: 0, end: 0, isFirst: true, isEndOfLine: true))
-  }
-  return rows
 }
 
 func findCursorVisualIndex(state: EditorState, rows: [VisualRow]) -> (index: Int, row: VisualRow) {

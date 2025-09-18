@@ -7,6 +7,7 @@ import Foundation
 enum EditorController {
   static func run() {
     var state = EditorState()
+    state.bufferDidChange()
     run(state: &state)
   }
 
@@ -14,7 +15,7 @@ enum EditorController {
     var state = EditorState()
     state.buffer = initialBuffer
     state.savedBuffer = initialBuffer
-    state.refreshDirtyFlag()
+    state.bufferDidChange()
     state.filePath = filePath
     if let cursor = initialCursor {
       state.cursorLine = cursor.line
