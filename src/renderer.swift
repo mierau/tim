@@ -100,7 +100,7 @@ func drawEditor(state: inout EditorState) {
   let footerLines = 2
   let maxVisibleRows = termSize.rows - headerLines - footerLines
   let contentWidth = termSize.cols - 6
-  let visualRows = buildVisualRows(state: state, contentWidth: max(1, contentWidth))
+  let visualRows = state.layoutCache.visualRows(for: state, contentWidth: max(1, contentWidth))
   let (cursorVIndex, cursorVRow) = findCursorVisualIndex(state: state, rows: visualRows)
   if state.pinCursorToView {
     if cursorVIndex < state.visualScrollOffset {

@@ -8,7 +8,7 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
       let headerLines = 1
       let footerLines = 2
       let maxVisibleRows = max(1, termSize.rows - headerLines - footerLines)
-      let vrows = buildVisualRows(state: state, contentWidth: contentWidth)
+      let vrows = state.layoutCache.visualRows(for: state, contentWidth: contentWidth)
       let delta = 1
       var newOffset = state.visualScrollOffset
       if event.button == 64 {
@@ -36,7 +36,7 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
       let contentWidth = max(1, termSize.cols - 6)
       let scrollbarColStart = 6 + contentWidth
       if event.x >= scrollbarColStart {
-        let vrows = buildVisualRows(state: state, contentWidth: contentWidth)
+        let vrows = state.layoutCache.visualRows(for: state, contentWidth: contentWidth)
         let headerLines = 1
         let footerLines = 2
         let maxVisibleRows = max(1, termSize.rows - headerLines - footerLines)
@@ -71,7 +71,7 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
         }
       }
       // Text area click
-      let vrows = buildVisualRows(state: state, contentWidth: contentWidth)
+      let vrows = state.layoutCache.visualRows(for: state, contentWidth: contentWidth)
       let vIndex = min(state.visualScrollOffset + localRow, max(0, vrows.count - 1))
       let vr = vrows[vIndex]
       let targetLine = vr.lineIndex
@@ -182,7 +182,7 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
         if state.isScrollbarDragging {
           let termSize = Terminal.getTerminalSize()
           let contentWidth = max(1, termSize.cols - 6)
-          let vrows = buildVisualRows(state: state, contentWidth: contentWidth)
+          let vrows = state.layoutCache.visualRows(for: state, contentWidth: contentWidth)
           let headerLines = 1
           let footerLines = 2
           let maxVisibleRows = max(1, termSize.rows - headerLines - footerLines)
@@ -203,7 +203,7 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
         }
         let termSize = Terminal.getTerminalSize()
         let contentWidth = max(1, termSize.cols - 6)
-        let vrows = buildVisualRows(state: state, contentWidth: contentWidth)
+        let vrows = state.layoutCache.visualRows(for: state, contentWidth: contentWidth)
         let vIndex = min(state.visualScrollOffset + localRow, max(0, vrows.count - 1))
         let vr = vrows[vIndex]
         let targetLine = vr.lineIndex

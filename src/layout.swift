@@ -8,6 +8,32 @@ struct VisualRow {
   let isEndOfLine: Bool
 }
 
+struct LayoutCache {
+  private(set) var cachedRows: [VisualRow] = []
+  private var cachedWidth: Int = -1
+  private var cachedGeneration: Int = -1
+
+  mutating func invalidate() {
+    cachedGeneration = -1
+  }
+
+  mutating func visualRows(for state: EditorState, contentWidth: Int) -> [VisualRow] {
+    guard contentWidth > 0 else {
+      cachedRows = []
+      cachedWidth = contentWidth
+      cachedGeneration = state.layoutGeneration
+      return cachedRows
+    }
+
+    if cachedWidth != contentWidth || cachedGeneration != state.layoutGeneration {
+      cachedRows = computeVisualRows(state: state, contentWidth: contentWidth)
+      cachedWidth = contentWidth
+      cachedGeneration = state.layoutGeneration
+    }
+    return cachedRows
+  }
+}
+
 func wrapLineIndices(_ line: String, width: Int) -> [Int] {
   let count = line.count
   if width <= 0 { return [0, count] }
@@ -66,7 +92,7 @@ func wrapLineIndices(_ line: String, width: Int) -> [Int] {
   return indices
 }
 
-func buildVisualRows(state: EditorState, contentWidth: Int) -> [VisualRow] {
+func computeVisualRows(state: EditorState, contentWidth: Int) -> [VisualRow] {
   var rows: [VisualRow] = []
   for (li, line) in state.buffer.enumerated() {
     let cuts = wrapLineIndices(line, width: contentWidth)

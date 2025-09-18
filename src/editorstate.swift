@@ -84,6 +84,8 @@ struct EditorState {
   var redoStack: [UndoSnapshot]
   var lastUndoOperation: UndoOperationKind?
   var lastUndoTimestamp: Date?
+  var layoutCache: LayoutCache
+  var layoutGeneration: Int
 
   var displayFilename: String {
     if let filePath { return URL(fileURLWithPath: filePath).lastPathComponent }
@@ -117,6 +119,8 @@ struct EditorState {
     self.redoStack = []
     self.lastUndoOperation = nil
     self.lastUndoTimestamp = nil
+    self.layoutCache = LayoutCache()
+    self.layoutGeneration = 0
   }
 
   mutating func clampCursor() {
@@ -196,5 +200,11 @@ struct EditorState {
 
   mutating func refreshDirtyFlag() {
     isDirty = buffer != savedBuffer
+    markLayoutDirty()
+  }
+
+  mutating func markLayoutDirty() {
+    layoutGeneration &+= 1
+    layoutCache.invalidate()
   }
 }

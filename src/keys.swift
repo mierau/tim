@@ -387,7 +387,7 @@ func pageScroll(up: Bool, state: inout EditorState, fraction: Double = 1.0) {
   let headerLines = 1
   let footerLines = 2
   let maxVisibleRows = max(1, termSize.rows - headerLines - footerLines)
-  let vrows = buildVisualRows(state: state, contentWidth: contentWidth)
+  let vrows = state.layoutCache.visualRows(for: state, contentWidth: contentWidth)
   let (curVIndex, curVRow) = findCursorVisualIndex(state: state, rows: vrows)
   let colInRow = max(0, state.cursorColumn - curVRow.start)
   let page = maxVisibleRows
@@ -461,7 +461,7 @@ func moveCursorByVisualRow(direction: Int, state: inout EditorState) -> Bool {
   state.clampCursor()
   let termSize = Terminal.getTerminalSize()
   let contentWidth = max(1, termSize.cols - 6)
-  let visualRows = buildVisualRows(state: state, contentWidth: contentWidth)
+  let visualRows = state.layoutCache.visualRows(for: state, contentWidth: contentWidth)
   if visualRows.isEmpty { return false }
 
   let (currentIndex, currentRow) = findCursorVisualIndex(state: state, rows: visualRows)
