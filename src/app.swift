@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationNetworking)
+  import FoundationNetworking
+#endif
+
 #if canImport(Darwin)
   import Darwin
 #endif
@@ -20,6 +24,7 @@ struct Tim {
 
     var lineNumber: Int?
     var filePath: String?
+    var remoteURL: URL?
     var readFromStdin = false
     var acceptFlags = true
 
@@ -55,6 +60,12 @@ struct Tim {
         continue
       }
 
+      if remoteURL == nil, filePath == nil, let url = parseRemoteURL(arg) {
+        remoteURL = url
+        index += 1
+        continue
+      }
+
       if filePath == nil, let parsed = parseFileArgumentWithLine(arg) {
         filePath = parsed.path
         if let line = parsed.line { lineNumber = line }
@@ -81,6 +92,11 @@ struct Tim {
       return
     }
 
+    if let url = remoteURL {
+      openRemoteResource(at: url, lineNumber: lineNumber)
+      return
+    }
+
     if let path = filePath {
       openFile(at: path, lineNumber: lineNumber)
       return
@@ -88,6 +104,14 @@ struct Tim {
 
     // No file provided; open blank buffer (line hint is ignored)
     EditorController.run()
+  }
+
+  private static func parseRemoteURL(_ argument: String) -> URL? {
+    guard let url = URL(string: argument) else { return nil }
+    guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+      return nil
+    }
+    return url
   }
 
   private static func parsePrefixedLineNumber(_ argument: String) -> Int? {
@@ -153,14 +177,64 @@ struct Tim {
   }
 
   private static func makeBuffer(from content: String) -> [String] {
-    let lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    let normalized = content.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+    let lines = normalized.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
     return lines.isEmpty ? [""] : lines
+  }
+
+  private static func openRemoteResource(at url: URL, lineNumber: Int?) {
+    let (data, response, error) = URLSession.shared.syncRequest(with: url)
+
+    if let error {
+      fputs("Failed to fetch \(url.absoluteString): \(error.localizedDescription)\n", stderr)
+      exit(1)
+    }
+
+    if let http = response as? HTTPURLResponse,
+      !(200...299).contains(http.statusCode)
+    {
+      fputs("Server responded with status \(http.statusCode) for \(url.absoluteString)\n", stderr)
+      exit(1)
+    }
+
+    guard let data else {
+      fputs("No data received from \(url.absoluteString)\n", stderr)
+      exit(1)
+    }
+
+    do {
+      let content = try makeTextContent(from: data)
+      let buffer = makeBuffer(from: content)
+      let cursor = initialCursor(for: lineNumber, buffer: buffer)
+      let savePath = derivedSavePath(for: url)
+      EditorController.run(initialBuffer: buffer, filePath: savePath, initialCursor: cursor)
+    } catch let error as DocumentLoadError {
+      fputs("\(error.messageForFile(path: url.absoluteString))\n", stderr)
+      exit(1)
+    } catch {
+      fputs("Failed to decode remote content from \(url.absoluteString): \(error)\n", stderr)
+      exit(1)
+    }
+  }
+
+  private static func derivedSavePath(for url: URL) -> String {
+    var candidate = url.lastPathComponent
+    if let decoded = candidate.removingPercentEncoding { candidate = decoded }
+    if candidate.isEmpty || candidate == "/" {
+      candidate = "index.html"
+    }
+    if !candidate.contains(".") {
+      candidate += ".html"
+    }
+    let cwd = FileManager.default.currentDirectoryPath
+    let sanitized = candidate.replacingOccurrences(of: "\0", with: "")
+    return (cwd as NSString).appendingPathComponent(sanitized)
   }
 
   private static func makeTextContent(from data: Data) throws -> String {
     guard !dataLooksBinary(data) else { throw DocumentLoadError.binary }
     guard let content = String(data: data, encoding: .utf8) else { throw DocumentLoadError.notUTF8 }
-    return content
+    return sanitizeContent(content)
   }
 
   private static func dataLooksBinary(_ data: Data) -> Bool {
@@ -213,6 +287,7 @@ struct Tim {
     Usage:
       tim                       Open an empty buffer
       tim <file>                Open <file>
+      tim <http(s) url>         Download URL into a new buffer (UTF-8 text only)
       tim <file>:+<line>        Open <file> and jump to <line> (1-based)
       tim +<line> <file>        Jump to <line> after loading <file>
       tim -- <file>             Treat following argument as a literal path
@@ -221,5 +296,64 @@ struct Tim {
       tim --version             Show the current version
     """
     print(usage.trimmingCharacters(in: .whitespacesAndNewlines))
+  }
+}
+
+private extension URLSession {
+  func syncRequest(with url: URL) -> (Data?, URLResponse?, Error?) {
+    let semaphore = DispatchSemaphore(value: 0)
+    var resultData: Data?
+    var resultResponse: URLResponse?
+    var resultError: Error?
+
+    let task = dataTask(with: url) { data, response, error in
+      resultData = data
+      resultResponse = response
+      resultError = error
+      semaphore.signal()
+    }
+
+    task.resume()
+    semaphore.wait()
+    return (resultData, resultResponse, resultError)
+  }
+}
+
+private extension Tim {
+  static func sanitizeContent(_ text: String) -> String {
+    var result = String()
+    result.reserveCapacity(text.count)
+    var skipNextLineFeed = false
+
+    for scalar in text.unicodeScalars {
+      switch scalar.value {
+      case 0x0D:  // Carriage return
+        result.append("\n")
+        skipNextLineFeed = true
+      case 0x0A:  // Line feed
+        if skipNextLineFeed {
+          skipNextLineFeed = false
+        } else {
+          result.append("\n")
+        }
+      case 0x09:  // Horizontal tab
+        result.append("  ")
+        skipNextLineFeed = false
+      case 0x2028, 0x2029:  // Unicode line/paragraph separators
+        result.append("\n")
+        skipNextLineFeed = false
+      default:
+        skipNextLineFeed = false
+        let category = scalar.properties.generalCategory
+        switch category {
+        case .control, .format:
+          result.append(" ")
+        default:
+          result.append(String(scalar))
+        }
+      }
+    }
+
+    return result
   }
 }

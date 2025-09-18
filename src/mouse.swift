@@ -1,6 +1,29 @@
 import Foundation
 
 func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
+  if event.button >= 64 && event.button <= 67 {
+    if event.isPress {
+      let termSize = Terminal.getTerminalSize()
+      let contentWidth = max(1, termSize.cols - 6)
+      let headerLines = 1
+      let footerLines = 2
+      let maxVisibleRows = max(1, termSize.rows - headerLines - footerLines)
+      let vrows = buildVisualRows(state: state, contentWidth: contentWidth)
+      let delta = 1
+      var newOffset = state.visualScrollOffset
+      if event.button == 64 {
+        newOffset = max(0, newOffset - delta)
+      } else if event.button == 65 {
+        let maxOffset = max(0, vrows.count - maxVisibleRows)
+        newOffset = min(maxOffset, newOffset + delta)
+      }
+      state.visualScrollOffset = newOffset
+      state.pinCursorToView = false
+      state.needsRedraw = true
+    }
+    return
+  }
+
   let isMotion = (event.button & 32) != 0
   let baseButton = event.button & 0b11
 
@@ -245,26 +268,6 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
           break
         }
       }
-    }
-  } else if event.button >= 64 && event.button <= 67 {
-    if event.isPress {
-      let termSize = Terminal.getTerminalSize()
-      let contentWidth = max(1, termSize.cols - 6)
-      let headerLines = 1
-      let footerLines = 2
-      let maxVisibleRows = max(1, termSize.rows - headerLines - footerLines)
-      let vrows = buildVisualRows(state: state, contentWidth: contentWidth)
-      let delta = 1
-      var newOffset = state.visualScrollOffset
-      if event.button == 64 {
-        newOffset = max(0, newOffset - delta)
-      } else if event.button == 65 {
-        let maxOffset = max(0, vrows.count - maxVisibleRows)
-        newOffset = min(maxOffset, newOffset + delta)
-      }
-      state.visualScrollOffset = newOffset
-      state.pinCursorToView = false
-      state.needsRedraw = true
     }
   }
 }
