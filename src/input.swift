@@ -7,6 +7,9 @@ struct MouseEvent {
   let x: Int
   let y: Int
   let isPress: Bool
+  let modifiers: Int
+
+  var hasShift: Bool { (modifiers & 4) != 0 }
 }
 
 func parseMouseEvent() -> MouseEvent? {
@@ -35,11 +38,12 @@ func parseMouseEvent() -> MouseEvent? {
     let parts = content.split(separator: ";")
 
     if parts.count == 3,
-      let button = Int(parts[0]),
+      let rawButton = Int(parts[0]),
       let x = Int(parts[1]),
       let y = Int(parts[2])
     {
-      return MouseEvent(button: button, x: x, y: y, isPress: isPress)
+      let modifiers = rawButton & 0b11100
+      return MouseEvent(button: rawButton, x: x, y: y, isPress: isPress, modifiers: modifiers)
     }
   }
 

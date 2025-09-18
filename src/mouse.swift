@@ -1,7 +1,10 @@
 import Foundation
 
 func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
-  if event.button == 0 {
+  let isMotion = (event.button & 32) != 0
+  let baseButton = event.button & 0b11
+
+  if baseButton == 0 && !isMotion {
     let contentTop = 2
     let localRow = event.y - contentTop
     let editorCol = max(0, event.x - 6)
@@ -55,6 +58,39 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
       if event.isPress {
         state.pinCursorToView = false
         let now = Date()
+        if event.hasShift {
+          var anchorPoint: (line: Int, column: Int)
+          if state.hasSelection, let startSel = state.selectionStart, let endSel = state.selectionEnd {
+            let (start, end) = state.normalizeSelection(start: startSel, end: endSel)
+            if state.cursorLine == start.line && state.cursorColumn == start.column {
+              anchorPoint = end
+            } else {
+              anchorPoint = start
+            }
+          } else {
+            anchorPoint = (line: state.cursorLine, column: state.cursorColumn)
+          }
+
+          state.selectionMode = .character(anchorLine: anchorPoint.line, anchorColumn: anchorPoint.column)
+          let (selStart, selEnd) = state.normalizeSelection(
+            start: anchorPoint, end: (line: targetLine, column: targetColumn))
+          state.selectionStart = selStart
+          state.selectionEnd = selEnd
+          state.cursorLine = targetLine
+          state.cursorColumn = targetColumn
+          state.clampCursor()
+          state.showCursor()
+          state.isDragging = false
+          state.isScrollbarDragging = false
+          state.lastClickTime = now
+          state.lastClickLine = targetLine
+          state.lastClickColumn = targetColumn
+          state.lastClickCount = 1
+          state.pinCursorToView = true
+          state.needsRedraw = true
+          return
+        }
+
         var clickCount = 1
         if let lastTime = state.lastClickTime,
           let lastLine = state.lastClickLine,
@@ -114,7 +150,7 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
         if state.isScrollbarDragging { state.isScrollbarDragging = false }
       }
     }
-  } else if event.button == 32 {
+  } else if baseButton == 0 && isMotion {
     if state.isDragging || state.isScrollbarDragging {
       let contentTop = 2
       let localRow = event.y - contentTop
