@@ -263,6 +263,8 @@ private func makeControlHints() -> (String, Int) {
   let shortcuts: [(String, String)] = [
     ("⌃Q", "quit"),
     ("⌃S", "save"),
+    ("⌃Z", "undo"),
+    ("⌃Y", "redo"),
     ("⌃C", "copy"),
     ("⌃V", "paste")
   ]

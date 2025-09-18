@@ -13,6 +13,8 @@ enum EditorController {
   static func run(initialBuffer: [String], filePath: String?, initialCursor: (line: Int, column: Int)? = nil) {
     var state = EditorState()
     state.buffer = initialBuffer
+    state.savedBuffer = initialBuffer
+    state.refreshDirtyFlag()
     state.filePath = filePath
     if let cursor = initialCursor {
       state.cursorLine = cursor.line
@@ -64,6 +66,8 @@ enum EditorController {
         case 24: cutSelection(state: &editorState)
         case 22: pasteClipboard(state: &editorState)
         case 19: saveDocument(state: &editorState)
+        case 26: undo(state: &editorState)
+        case 25: redo(state: &editorState)
         case 13, 10: insertNewline(state: &editorState)
         case 127, 8: backspace(state: &editorState)
         case 9: insertTab(state: &editorState)
@@ -71,7 +75,6 @@ enum EditorController {
         case 5: moveToEndOfLine(state: &editorState)
         case 11: deleteToEndOfLine(state: &editorState)
         case 2: moveToBeginningOfLine(state: &editorState)
-        case 26: break
         case 23: smartDeleteBackward(state: &editorState)
         case 21: selectLineUp(state: &editorState)
         case 4: selectLineDown(state: &editorState)

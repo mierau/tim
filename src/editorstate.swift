@@ -7,6 +7,56 @@ enum SelectionMode {
   case line(anchorLine: Int)
 }
 
+enum UndoOperationKind {
+  case insert
+  case deleteBackward
+  case deleteForward
+  case paste
+  case other
+
+  var coalesces: Bool {
+    switch self {
+    case .insert, .deleteBackward:
+      return true
+    default:
+      return false
+    }
+  }
+}
+
+struct UndoSnapshot {
+  let buffer: [String]
+  let cursorLine: Int
+  let cursorColumn: Int
+  let selectionStart: (line: Int, column: Int)?
+  let selectionEnd: (line: Int, column: Int)?
+  let scrollOffset: Int
+  let visualScrollOffset: Int
+
+  init(state: EditorState) {
+    self.buffer = state.buffer
+    self.cursorLine = state.cursorLine
+    self.cursorColumn = state.cursorColumn
+    self.selectionStart = state.selectionStart
+    self.selectionEnd = state.selectionEnd
+    self.scrollOffset = state.scrollOffset
+    self.visualScrollOffset = state.visualScrollOffset
+  }
+
+  func apply(to state: inout EditorState) {
+    state.buffer = buffer
+    state.cursorLine = cursorLine
+    state.cursorColumn = cursorColumn
+    state.selectionStart = selectionStart
+    state.selectionEnd = selectionEnd
+    state.scrollOffset = scrollOffset
+    state.visualScrollOffset = visualScrollOffset
+    state.needsRedraw = true
+    state.pinCursorToView = true
+    state.refreshDirtyFlag()
+  }
+}
+
 struct EditorState {
   var buffer: [String]
   var cursorLine: Int
@@ -29,6 +79,11 @@ struct EditorState {
   var filePath: String?
   var shouldQuit: Bool
   var isDirty: Bool
+  var savedBuffer: [String]
+  var undoStack: [UndoSnapshot]
+  var redoStack: [UndoSnapshot]
+  var lastUndoOperation: UndoOperationKind?
+  var lastUndoTimestamp: Date?
 
   var displayFilename: String {
     if let filePath { return URL(fileURLWithPath: filePath).lastPathComponent }
@@ -57,6 +112,11 @@ struct EditorState {
     self.filePath = nil
     self.shouldQuit = false
     self.isDirty = false
+    self.savedBuffer = buffer
+    self.undoStack = []
+    self.redoStack = []
+    self.lastUndoOperation = nil
+    self.lastUndoTimestamp = nil
   }
 
   mutating func clampCursor() {
@@ -132,5 +192,9 @@ struct EditorState {
     } else {
       return (end, start)
     }
+  }
+
+  mutating func refreshDirtyFlag() {
+    isDirty = buffer != savedBuffer
   }
 }
