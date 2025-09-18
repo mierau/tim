@@ -18,6 +18,8 @@ The Mac-friendly command line text editor.
 - Status footer with live line/column counts and selection summaries.
 - Looks great in with or without terminal colors.
 - Mac-like ctrl-q shortcut to quit.
+- Open documents over HTTP(S).
+- Open text-friendly versions of Wikipedia articles.
 
 ## Installation
 1. Ensure Xcode command line tools or a Swift 5.9+ toolchain is installed.
@@ -41,6 +43,16 @@ tim path/to/file:+42
 tim +42 path/to/file
 ```
 
+Open a file over http(s):
+```sh
+tim https://web.site/document.html
+```
+
+Open a text-friendly Wikipedia article:
+```sh
+tim -w albert einstein
+```
+
 Additional flags:
 - `tim --help` prints the available options.
 - `tim --version` shows the current release tag.
@@ -48,14 +60,17 @@ Additional flags:
 - Use `--` before a path that begins with `-` to treat it literally.
 
 ## Project Layout
-- `src/app.swift` bootstraps argument parsing and file loading
-- `src/editorcontroller.swift` orchestrates the main render loop
-- `src/editorstate.swift` tracks buffer, cursor, selection, and scroll state
-- `src/actions.swift` applies editing actions from keyboard and mouse events
-- `src/layout.swift` wraps logical lines into visual rows
-- `src/renderer.swift` handles drawing, gutter styling, and status footer output
-- `src/input.swift`, `src/keys.swift`, `src/mouse.swift` decode device input
-- `src/terminal.swift` and `src/scrollbar.swift` manage escape sequences and gutter math
+- `src/app.swift` bootstraps CLI parsing, file loading, and Wikipedia/HTTP entry points
+- `src/editorcontroller.swift` orchestrates the main render loop and terminal lifetime
+- `src/editorstate.swift` tracks buffer, cursor/selection state, undo stacks, and layout cache metadata
+- `src/actions.swift` applies text mutations, clipboard, and selection helpers
+- `src/layout.swift` wraps logical lines into visual rows (cached per terminal width)
+- `src/renderer.swift` draws the editor frame, gutter, status footer, and cursor
+- `src/input.swift`, `src/keys.swift`, `src/mouse.swift` decode keyboard/mouse events and route them to actions
+- `src/terminal.swift` and `src/scrollbar.swift` emit escape codes and scrollbar math
+- `src/http.swift` implements the synchronous URLSession helpers used across the app
+- `src/wikipedia.swift` fetches and parses plain-text article extracts
+- `src/clipboard.swift` bridges to `pbcopy`/`pbpaste` for macOS clipboard integration
 
 ## License
 This project is available under the terms of the [MIT License](LICENSE).
