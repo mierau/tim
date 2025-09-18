@@ -463,3 +463,33 @@ private func insertText(_ text: String, state: inout EditorState) {
   state.showCursor()
   state.isDirty = true
 }
+
+func saveDocument(state: inout EditorState) {
+  let defaultFileName = "untitled.txt"
+  let resolvedPath: String
+  if let existing = state.filePath, !existing.isEmpty {
+    resolvedPath = existing
+  } else {
+    let cwd = FileManager.default.currentDirectoryPath
+    resolvedPath = (cwd as NSString).appendingPathComponent(defaultFileName)
+    state.filePath = resolvedPath
+  }
+
+  let expandedPath = (resolvedPath as NSString).expandingTildeInPath
+  let fileURL = URL(fileURLWithPath: expandedPath)
+  let directoryURL = fileURL.deletingLastPathComponent()
+
+  do {
+    let directoryPath = directoryURL.path
+    if !directoryPath.isEmpty && directoryPath != "." {
+      try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true, attributes: nil)
+    }
+    let contents = state.buffer.joined(separator: "\n")
+    try contents.write(to: fileURL, atomically: true, encoding: .utf8)
+    state.filePath = expandedPath
+    state.isDirty = false
+    state.needsRedraw = true
+  } catch {
+    fputs("Failed to save file: \(expandedPath) (\(error))\n", stderr)
+  }
+}

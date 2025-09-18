@@ -109,18 +109,27 @@ struct Tim {
 
   private static func openFile(at rawPath: String, lineNumber: Int?) {
     let expandedPath = (rawPath as NSString).expandingTildeInPath
-    do {
-      let data = try Data(contentsOf: URL(fileURLWithPath: expandedPath))
-      let content = try makeTextContent(from: data)
-      let buffer = makeBuffer(from: content)
+    let fileURL = URL(fileURLWithPath: expandedPath)
+    let fileManager = FileManager.default
+
+    if fileManager.fileExists(atPath: expandedPath) {
+      do {
+        let data = try Data(contentsOf: fileURL)
+        let content = try makeTextContent(from: data)
+        let buffer = makeBuffer(from: content)
+        let cursor = initialCursor(for: lineNumber, buffer: buffer)
+        EditorController.run(initialBuffer: buffer, filePath: expandedPath, initialCursor: cursor)
+      } catch let error as DocumentLoadError {
+        fputs("\(error.messageForFile(path: expandedPath))\n", stderr)
+        exit(1)
+      } catch {
+        fputs("Failed to open file: \(expandedPath) (\(error))\n", stderr)
+        exit(1)
+      }
+    } else {
+      let buffer = [""]
       let cursor = initialCursor(for: lineNumber, buffer: buffer)
       EditorController.run(initialBuffer: buffer, filePath: expandedPath, initialCursor: cursor)
-    } catch let error as DocumentLoadError {
-      fputs("\(error.messageForFile(path: expandedPath))\n", stderr)
-      exit(1)
-    } catch {
-      fputs("Failed to open file: \(expandedPath) (\(error))\n", stderr)
-      exit(1)
     }
   }
 
