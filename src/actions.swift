@@ -25,7 +25,7 @@ func insertNewline(state: inout EditorState) {
   let beforeCursor = String(line.prefix(safeColumn))
   let afterCursor = String(line.dropFirst(safeColumn))
   let baseIndentation = getIndentation(line: line)
-  let newIndentation = getNewLineIndentation(line: line, baseIndentation: baseIndentation)
+  let newIndentation = baseIndentation
   state.buffer[state.cursorLine] = beforeCursor
   state.buffer.insert(newIndentation + afterCursor, at: state.cursorLine + 1)
   state.cursorLine += 1
@@ -40,20 +40,6 @@ func getIndentation(line: String) -> String {
     if char == " " || char == "\t" { indentation.append(char) } else { break }
   }
   return indentation
-}
-
-func getNewLineIndentation(line: String, baseIndentation: String) -> String {
-  let trimmedLine = line.trimmingCharacters(in: .whitespaces)
-  let blockKeywords = ["if", "loop", "for", "while", "func", "function", "unless", "else"]
-  for keyword in blockKeywords {
-    if trimmedLine.hasPrefix(keyword + " ") || trimmedLine == keyword {
-      return baseIndentation + "  "
-    }
-  }
-  if trimmedLine.hasSuffix("[") { return baseIndentation + "  " }
-  if trimmedLine.hasSuffix(" then") || trimmedLine == "then" { return baseIndentation + "  " }
-  if trimmedLine.hasSuffix(" do") || trimmedLine == "do" { return baseIndentation + "  " }
-  return baseIndentation
 }
 
 func backspace(state: inout EditorState) {
