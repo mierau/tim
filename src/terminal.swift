@@ -107,4 +107,40 @@ struct Terminal {
     _ = ioctl(STDOUT_FILENO, TIOCGWINSZ, &w)
     return (Int(w.ws_row), Int(w.ws_col))
   }
+
+  static func displayWidth(of character: Character) -> Int {
+    var width = 0
+    for scalar in character.unicodeScalars {
+      #if canImport(Darwin)
+        let result = Darwin.wcwidth(wint_t(scalar.value))
+        if result > 0 { width += Int(result) }
+      #else
+        width += 1
+      #endif
+    }
+
+    if width == 0 {
+      let scalars = character.unicodeScalars
+      if scalars.allSatisfy({ $0.properties.generalCategory == .control }) { return 0 }
+      if scalars.allSatisfy({
+        switch $0.properties.generalCategory {
+        case .nonspacingMark, .enclosingMark, .spacingMark: return true
+        default: return false
+        }
+      }) {
+        return 0
+      }
+      return max(1, scalars.isEmpty ? 0 : scalars.count)
+    }
+
+    return width
+  }
+
+  static func displayWidth(of string: String) -> Int {
+    var width = 0
+    for character in string {
+      width += displayWidth(of: character)
+    }
+    return width
+  }
 }

@@ -80,15 +80,14 @@ enum EditorController {
         case 4: selectLineDown(state: &editorState)
         case 27: handleEscapeSequence(state: &editorState)
         default:
-          if key >= 32 && key <= 126 {
-            let char = Character(UnicodeScalar(key)!)
+          if key >= 32, let char = decodeInputCharacter(startingWith: key) {
             if char == "[" {
               let nextKey = readKeyWithTimeout()
               if nextKey == 65 || nextKey == 66 || nextKey == 67 || nextKey == 68 {
                 continue
-              } else if nextKey != -1 {
+              } else if nextKey != -1, let nextChar = decodeInputCharacter(startingWith: nextKey) {
                 insertCharacter(char, state: &editorState)
-                insertCharacter(Character(UnicodeScalar(nextKey)!), state: &editorState)
+                insertCharacter(nextChar, state: &editorState)
               } else {
                 insertCharacter(char, state: &editorState)
               }

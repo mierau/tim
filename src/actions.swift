@@ -12,8 +12,9 @@ func insertCharacter(_ char: Character, state: inout EditorState) {
   let safeColumn = min(state.cursorColumn, line.count)
   let beforeCursor = String(line.prefix(safeColumn))
   let afterCursor = String(line.dropFirst(safeColumn))
-  state.buffer[state.cursorLine] = beforeCursor + String(char) + afterCursor
-  state.cursorColumn += 1
+  let insertion = String(char)
+  state.buffer[state.cursorLine] = beforeCursor + insertion + afterCursor
+  state.cursorColumn = safeColumn + insertion.count
   state.refreshDirtyFlag()
 }
 

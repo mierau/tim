@@ -9,6 +9,9 @@ struct Tim {
   static let version = "0.1.0"
 
   static func main() {
+    #if canImport(Darwin)
+      setlocale(LC_CTYPE, "")
+    #endif
     let args = Array(CommandLine.arguments.dropFirst())
     if args.isEmpty {
       EditorController.run()

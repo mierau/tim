@@ -15,24 +15,52 @@ func wrapLineIndices(_ line: String, width: Int) -> [Int] {
 
   var indices: [Int] = [0]
   let chars = Array(line)
+  let widths = chars.map { max(0, Terminal.displayWidth(of: $0)) }
+  let displayWidth = widths.reduce(0, +)
+  if displayWidth <= width {
+    indices.append(chars.count)
+    return indices
+  }
   var pos = 0
+
   while pos < chars.count {
-    let remaining = chars.count - pos
-    if remaining <= width {
+    var currentWidth = 0
+    var lastBreak: Int?
+    var idx = pos
+
+    while idx < chars.count {
+      let charWidth = widths[idx]
+      if currentWidth + charWidth > width {
+        if currentWidth == 0 {
+          idx += 1
+        }
+        break
+      }
+
+      currentWidth += charWidth
+      if chars[idx].isWhitespace { lastBreak = idx + 1 }
+      idx += 1
+
+      if currentWidth >= width { break }
+    }
+
+    if idx >= chars.count {
       indices.append(chars.count)
       break
     }
-    let breakPos = pos + width
-    var i = breakPos
-    while i > pos && !chars[i - 1].isWhitespace { i -= 1 }
-    if i == pos {
-      indices.append(pos + width)
-      pos += width
+
+    if let breakIndex = lastBreak, breakIndex > pos {
+      indices.append(breakIndex)
+      pos = breakIndex
+    } else if idx > pos {
+      indices.append(idx)
+      pos = idx
     } else {
-      indices.append(i)
-      pos = i
+      indices.append(pos + 1)
+      pos += 1
     }
   }
+
   if indices.last != chars.count { indices.append(chars.count) }
   if indices.count < 2 { indices.append(0) }
   return indices

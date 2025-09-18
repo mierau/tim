@@ -6,9 +6,14 @@ func renderLineWithSelection(
 ) -> String {
   var output = ""
   let logicalLineLength = state.buffer[lineIndex].count
-  for (column, char) in lineContent.enumerated() {
-    let isSelected = state.isPositionSelected(line: lineIndex, column: column + columnOffset)
-    output += isSelected ? Terminal.highlight + String(char) + Terminal.reset : String(char)
+  var renderedWidth = 0
+  var columnIndex = 0
+  for char in lineContent {
+    let isSelected = state.isPositionSelected(line: lineIndex, column: columnIndex + columnOffset)
+    let charString = String(char)
+    output += isSelected ? Terminal.highlight + charString + Terminal.reset : charString
+    renderedWidth += Terminal.displayWidth(of: char)
+    columnIndex += 1
   }
   if let startSel = state.selectionStart, let endSel = state.selectionEnd {
     let (start, end) = state.normalizeSelection(start: startSel, end: endSel)
@@ -59,8 +64,7 @@ func renderLineWithSelection(
 
       if emptyLineSelected { shouldExtend = true }
     }
-    let visibleLen = lineContent.count
-    let remaining = max(0, contentWidth - visibleLen)
+    let remaining = max(0, contentWidth - renderedWidth)
     if remaining > 0 {
       output +=
         shouldExtend
@@ -69,8 +73,7 @@ func renderLineWithSelection(
     }
   }
   if !state.hasSelection {
-    let visibleLen = lineContent.count
-    let remaining = max(0, contentWidth - visibleLen)
+    let remaining = max(0, contentWidth - renderedWidth)
     if remaining > 0 { output += String(repeating: " ", count: remaining) }
   }
   return output
@@ -113,8 +116,10 @@ func drawEditor(state: inout EditorState) {
   let termWidth = termSize.cols
 
   let spaceAroundTitle = 1
-  let indicatorTextLength = state.isDirty ? 2 : 0
-  let displayWidth = 2 * spaceAroundTitle + indicatorTextLength + filename.count
+  let indicatorText = state.isDirty ? "• " : ""
+  let indicatorVisibleWidth = Terminal.displayWidth(of: indicatorText)
+  let displayWidth =
+    2 * spaceAroundTitle + indicatorVisibleWidth + Terminal.displayWidth(of: filename)
   let availableWidth = max(0, termWidth - displayWidth)
   let leftCount = availableWidth / 2
   let rightCount = availableWidth - leftCount
@@ -166,7 +171,9 @@ func drawEditor(state: inout EditorState) {
         ? renderLineWithSelection(
           lineContent: fragment, lineIndex: vr.lineIndex, state: state, contentWidth: contentWidth,
           columnOffset: vr.start, isEndOfLogicalLine: vr.isEndOfLine)
-        : (fragment + String(repeating: " ", count: max(0, contentWidth - fragment.count)))
+        : (
+          fragment + String(
+            repeating: " ", count: max(0, contentWidth - Terminal.displayWidth(of: fragment))))
       print(lineOut + scrollbarChar)
     }
   }
@@ -191,7 +198,8 @@ func drawEditor(state: inout EditorState) {
   let status = makeStatusLine(state: state)
   let (controlHints, controlHintsLength) = makeControlHints()
   let statusText = status.text
-  let totalLength = 1 + controlHintsLength + 1 + statusText.count + 1
+  let statusDisplayWidth = Terminal.displayWidth(of: statusText)
+  let totalLength = 1 + controlHintsLength + 1 + statusDisplayWidth + 1
   let padding = max(0, termWidth - totalLength)
   let footerLine =
     " " + controlHints + String(repeating: " ", count: padding + 1) + status.color + statusText
@@ -203,8 +211,14 @@ func drawEditor(state: inout EditorState) {
     maxVisibleRows > 0 && cursorVIndex >= vScroll && cursorVIndex < vScroll + maxVisibleRows
   if cursorVisibleInView {
     let displayRow = 2 + (cursorVIndex - vScroll)
-    let cursorColInRow = max(0, state.cursorColumn - cursorVRow.start)
-    let displayCol = 6 + cursorColInRow
+    let line = state.buffer[state.cursorLine]
+    let safeStart = min(cursorVRow.start, line.count)
+    let safeCursor = min(state.cursorColumn, line.count)
+    let rowStartIndex = line.index(line.startIndex, offsetBy: safeStart)
+    let cursorIndex = line.index(line.startIndex, offsetBy: safeCursor)
+    let prefix = String(line[rowStartIndex..<cursorIndex])
+    let cursorVisualOffset = Terminal.displayWidth(of: prefix)
+    let displayCol = 6 + cursorVisualOffset
     print(Terminal.moveCursor(to: displayRow, col: displayCol), terminator: "")
     print(state.cursorVisible ? Terminal.showCursor : Terminal.hideCursor, terminator: "")
   } else {
@@ -269,15 +283,16 @@ private func makeControlHints() -> (String, Int) {
     ("⌃V", "paste")
   ]
   let parts = shortcuts.map { hint -> (String, Int) in
-    let textLength = hint.0.count + 1 + hint.1.count
+    let textLength = Terminal.displayWidth(of: hint.0) + 1 + Terminal.displayWidth(of: hint.1)
     let rendered = "\(Terminal.ansiCyan6)\(hint.0)\(Terminal.reset) "
       + "\(Terminal.brightBlack)\(hint.1)\(Terminal.reset)"
     return (rendered, textLength)
   }
   let separator = "  "
+  let separatorWidth = Terminal.displayWidth(of: separator)
   let renderedString = parts.enumerated().map { index, element in
     index == 0 ? element.0 : separator + element.0
   }.joined()
-  let totalLength = parts.reduce(0) { $0 + $1.1 } + separator.count * max(0, parts.count - 1)
+  let totalLength = parts.reduce(0) { $0 + $1.1 } + separatorWidth * max(0, parts.count - 1)
   return (renderedString, totalLength)
 }
