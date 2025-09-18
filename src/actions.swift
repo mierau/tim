@@ -241,61 +241,12 @@ func deleteToEndOfLine(state: inout EditorState) {
 }
 
 func jumpWordForward(state: inout EditorState) {
-  jumpWordForwardInternal(state: &state, clearSelection: true)
+  state.clearSelection()
+  moveCursorForwardByWord(state: &state)
 }
 func jumpWordBackward(state: inout EditorState) {
-  jumpWordBackwardInternal(state: &state, clearSelection: true)
-}
-
-func jumpWordForwardInternal(state: inout EditorState, clearSelection: Bool) {
-  if clearSelection { state.clearSelection() }
-  let currentLine = state.buffer[state.cursorLine]
-  if state.cursorColumn >= currentLine.count {
-    if state.cursorLine < state.buffer.count - 1 { state.cursorLine += 1; state.cursorColumn = 0 }
-    return
-  }
-  let afterCursor = String(currentLine.dropFirst(state.cursorColumn))
-  let newPosition = findWordForwardPosition(text: afterCursor)
-  state.cursorColumn += newPosition
-  if state.cursorColumn >= currentLine.count {
-    if state.cursorLine < state.buffer.count - 1 { state.cursorLine += 1; state.cursorColumn = 0 }
-  }
-  state.clampCursor(); state.showCursor()
-}
-
-func jumpWordBackwardInternal(state: inout EditorState, clearSelection: Bool) {
-  if clearSelection { state.clearSelection() }
-  if state.cursorColumn == 0 {
-    if state.cursorLine > 0 {
-      state.cursorLine -= 1; state.cursorColumn = state.buffer[state.cursorLine].count
-    }
-    return
-  }
-  let currentLine = state.buffer[state.cursorLine]
-  let beforeCursor = String(currentLine.prefix(state.cursorColumn))
-  let newPosition = findSmartDeletePosition(text: beforeCursor)
-  state.cursorColumn = newPosition
-  state.clampCursor(); state.showCursor()
-}
-
-func findWordForwardPosition(text: String) -> Int {
-  if text.isEmpty { return 0 }
-  let chars = Array(text)
-  var pos = 0
-  let startChar = chars[pos]
-  if startChar.isWhitespace {
-    while pos < chars.count && chars[pos].isWhitespace { pos += 1 }
-  } else if startChar.isLetter || startChar.isNumber || startChar == "_" {
-    while pos < chars.count && (chars[pos].isLetter || chars[pos].isNumber || chars[pos] == "_") {
-      pos += 1
-    }
-  } else {
-    while pos < chars.count && !chars[pos].isWhitespace && !chars[pos].isLetter
-      && !chars[pos].isNumber && chars[pos] != "_"
-    { pos += 1 }
-  }
-  while pos < chars.count && chars[pos].isWhitespace { pos += 1 }
-  return pos
+  state.clearSelection()
+  moveCursorBackwardByWord(state: &state)
 }
 
 func isWordCharacter(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "_" }
@@ -340,6 +291,94 @@ func wordRange(in line: String, at column: Int) -> (start: Int, end: Int) {
 
   // Symbols and punctuation: select only the clicked character
   return (clampedColumn, clampedColumn + 1)
+}
+
+func moveCursorForwardByWord(state: inout EditorState) {
+  var madeProgress = false
+  outer: while state.cursorLine < state.buffer.count {
+    let line = state.buffer[state.cursorLine]
+    if state.cursorColumn >= line.count {
+      if state.cursorLine < state.buffer.count - 1 {
+        state.cursorLine += 1
+        state.cursorColumn = 0
+        madeProgress = true
+        continue
+      }
+      break
+    }
+
+    let chars = Array(line)
+    var index = state.cursorColumn
+    let currentChar = chars[index]
+
+    if currentChar.isWhitespace {
+      while index < chars.count && chars[index].isWhitespace { index += 1 }
+      madeProgress = madeProgress || index != state.cursorColumn
+      state.cursorColumn = index
+      continue
+    }
+
+    if isWordCharacter(currentChar) {
+      while index < chars.count && isWordCharacter(chars[index]) { index += 1 }
+    } else {
+      while index < chars.count && !chars[index].isWhitespace && !isWordCharacter(chars[index]) {
+        index += 1
+      }
+    }
+
+    madeProgress = madeProgress || index != state.cursorColumn
+    state.cursorColumn = index
+    break outer
+  }
+
+  if madeProgress {
+    state.clampCursor()
+    state.showCursor()
+  }
+}
+
+func moveCursorBackwardByWord(state: inout EditorState) {
+  var madeProgress = false
+  outer: while state.cursorLine >= 0 {
+    if state.cursorColumn == 0 {
+      if state.cursorLine > 0 {
+        state.cursorLine -= 1
+        state.cursorColumn = state.buffer[state.cursorLine].count
+        madeProgress = true
+        continue
+      }
+      break
+    }
+
+    let line = state.buffer[state.cursorLine]
+    let chars = Array(line)
+    var index = state.cursorColumn - 1
+    let currentChar = chars[index]
+
+    if currentChar.isWhitespace {
+      while index >= 0 && chars[index].isWhitespace { index -= 1 }
+      madeProgress = true
+      state.cursorColumn = max(index + 1, 0)
+      continue
+    }
+
+    if isWordCharacter(currentChar) {
+      while index >= 0 && isWordCharacter(chars[index]) { index -= 1 }
+    } else {
+      while index >= 0 && !chars[index].isWhitespace && !isWordCharacter(chars[index]) {
+        index -= 1
+      }
+    }
+
+    madeProgress = true
+    state.cursorColumn = index + 1
+    break outer
+  }
+
+  if madeProgress {
+    state.clampCursor()
+    state.showCursor()
+  }
 }
 
 private func selectedText(from state: EditorState) -> String? {

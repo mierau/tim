@@ -5,6 +5,7 @@ func renderLineWithSelection(
   isEndOfLogicalLine: Bool = true
 ) -> String {
   var output = ""
+  let logicalLineLength = state.buffer[lineIndex].count
   for (column, char) in lineContent.enumerated() {
     let isSelected = state.isPositionSelected(line: lineIndex, column: column + columnOffset)
     output += isSelected ? Terminal.highlight + String(char) + Terminal.reset : String(char)
@@ -25,13 +26,38 @@ func renderLineWithSelection(
           || (lineIndex == end.line && start.line != end.line && end.column > 0)
       )
 
-      if selectionCoversFragment && (selectionContinuesSameLine || selectionContinuesNextLine) {
-        shouldExtend = true
-      } else if selectionCoversFragment, case .line = state.selectionMode {
-        shouldExtend = true
-      } else if emptyLineSelected {
+      if selectionCoversFragment {
+        if selectionContinuesSameLine || selectionContinuesNextLine || spansIntermediateLine {
+          shouldExtend = true
+        }
+        if case .line = state.selectionMode { shouldExtend = true }
+        if isEndOfLogicalLine,
+          fragmentEndColumn == logicalLineLength,
+          range.end > logicalLineLength
+        {
+          shouldExtend = true
+        }
+      }
+
+      if !shouldExtend,
+        isEndOfLogicalLine,
+        fragmentEndColumn == logicalLineLength,
+        range.start == logicalLineLength,
+        range.end > logicalLineLength
+      {
         shouldExtend = true
       }
+
+      if !shouldExtend,
+        isEndOfLogicalLine,
+        lineIndex == start.line,
+        lineIndex < end.line,
+        start.column >= logicalLineLength
+      {
+        shouldExtend = true
+      }
+
+      if emptyLineSelected { shouldExtend = true }
     }
     let visibleLen = lineContent.count
     let remaining = max(0, contentWidth - visibleLen)

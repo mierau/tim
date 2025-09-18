@@ -370,48 +370,15 @@ private func routeModifiedArrow(modifier: Int, arrow: Int, forcedAlt: Bool = fal
 }
 
 func extendSelectionWordForward(state: inout EditorState) {
-  let line = state.buffer[state.cursorLine]
-  let count = line.count
-  if state.cursorColumn >= count {
-    if state.cursorLine < state.buffer.count - 1 {
-      state.cursorLine += 1
-      state.cursorColumn = 0
-    }
-    return
-  }
-  let chars = Array(line)
-  var i = state.cursorColumn
-  let ch = chars[i]
-  if isWordCharacter(ch) {
-    while i < count && isWordCharacter(chars[i]) { i += 1 }
-  } else if ch.isWhitespace {
-    while i < count && chars[i].isWhitespace { i += 1 }
-  } else {
-    while i < count && !isWordCharacter(chars[i]) && !chars[i].isWhitespace { i += 1 }
-  }
-  state.cursorColumn = i
+  if !state.hasSelection { state.startSelection() }
+  moveCursorForwardByWord(state: &state)
+  state.updateSelection()
 }
 
 func extendSelectionWordBackward(state: inout EditorState) {
-  if state.cursorColumn == 0 {
-    if state.cursorLine > 0 {
-      state.cursorLine -= 1
-      state.cursorColumn = state.buffer[state.cursorLine].count
-    }
-    return
-  }
-  let line = state.buffer[state.cursorLine]
-  let chars = Array(line)
-  var i = state.cursorColumn - 1
-  let ch = chars[i]
-  if isWordCharacter(ch) {
-    while i >= 0 && isWordCharacter(chars[i]) { i -= 1 }
-  } else if ch.isWhitespace {
-    while i >= 0 && chars[i].isWhitespace { i -= 1 }
-  } else {
-    while i >= 0 && !isWordCharacter(chars[i]) && !chars[i].isWhitespace { i -= 1 }
-  }
-  state.cursorColumn = i + 1
+  if !state.hasSelection { state.startSelection() }
+  moveCursorBackwardByWord(state: &state)
+  state.updateSelection()
 }
 
 func pageScroll(up: Bool, state: inout EditorState, fraction: Double = 1.0) {
