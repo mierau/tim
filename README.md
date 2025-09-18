@@ -6,6 +6,9 @@ The Mac-friendly command line text editor.
 - Clean simple interface.
 - Select text using Mac keyboard shortcuts.
 - Copy/paste/cut support through ctrl-c/v/x (reads and writes to system clipboard).
+- Undo/redo support through ctrl-z/ctrl-y.
+- Documents have an edited marker when they've been edited but not saved.
+- Save new or edited documents with ctrl-s.
 - Use a mouse or trackpad to select with single, double, or triple-click selection.
 - Use a trackpad and scroll wheel to scroll long documents.
 - Proportional scrollbar you can drag to scroll around a document.
