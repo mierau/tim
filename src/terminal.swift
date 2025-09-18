@@ -18,6 +18,16 @@ struct Terminal {
   static let pink = "\(ESC)[95m"
   static let grey = "\(ESC)[90m"
   static let yellow = "\(ESC)[33m"
+  static let red = "\(ESC)[31m"
+  static let white = "\(ESC)[37m"
+  static let closeSymbol = "●"
+  static let cyan = "\(ESC)[36m"
+  static let brightCyan = "\(ESC)[96m"
+  static let brightBlack = "\(ESC)[90m"
+  static let ansiCyan6 = "\(ESC)[38;5;6m"
+  static let ansiBlue12 = "\(ESC)[38;5;12m"
+  static let ansiBlue209 = "\(ESC)[38;5;209m"
+  static let ansiColor226 = "\(ESC)[38;5;226m"
   // Selection highlight: reverse video to remain visible even when terminals disable custom colors
   static let highlight = "\(ESC)[7m"
   // Subtle scrollbar styling

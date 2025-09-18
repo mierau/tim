@@ -95,6 +95,9 @@ enum EditorController {
         }
       }
       usleep(16000)
+      if editorState.shouldQuit {
+        running = false
+      }
     }
   }
 }

@@ -111,20 +111,26 @@ func drawEditor(state: inout EditorState) {
   // Header
   let filename = state.displayFilename
   let termWidth = termSize.cols
-  let decoratedName = " \(filename) "
-  let availableWidth = max(0, termWidth - decoratedName.count)
+
+  let spaceAroundTitle = 1
+  let indicatorTextLength = state.isDirty ? 2 : 0
+  let displayWidth = 2 * spaceAroundTitle + indicatorTextLength + filename.count
+  let availableWidth = max(0, termWidth - displayWidth)
   let leftCount = availableWidth / 2
   let rightCount = availableWidth - leftCount
-  // Use a contiguous double-line box drawing glyph; triple-line glyphs like U+2261 introduce spacing.
   let barCharacter = "\u{2550}"
+  let indicatorStyled = state.isDirty ? "\(Terminal.white)•\(Terminal.reset) " : ""
+  let decoratedDisplay = String(repeating: " ", count: spaceAroundTitle)
+    + indicatorStyled + Terminal.bold + filename + Terminal.reset
+    + String(repeating: " ", count: spaceAroundTitle)
   let leftDecoration = leftCount > 0
     ? Terminal.grey + String(repeating: barCharacter, count: leftCount) + Terminal.reset
     : ""
   let rightDecoration = rightCount > 0
     ? Terminal.grey + String(repeating: barCharacter, count: rightCount) + Terminal.reset
     : ""
-  let nameSegment = Terminal.bold + Terminal.green + decoratedName + Terminal.reset
-  print(leftDecoration + nameSegment + rightDecoration)
+  let headerLine = leftDecoration + decoratedDisplay + rightDecoration
+  print(headerLine)
 
   // Body
   let startV = max(0, min(vScroll, max(0, visualRows.count - 1)))
@@ -140,8 +146,10 @@ func drawEditor(state: inout EditorState) {
       if vr.isFirst {
         let isActiveLine = !state.hasSelection && vr.lineIndex == state.cursorLine
         let isSelectedLine = lineIsSelected(lineIndex: vr.lineIndex, state: state)
-        let lineNumberColor = (isActiveLine || isSelectedLine) ? Terminal.pink : Terminal.grey
-        print(lineNumberColor + String(format: "%4d", lineNum) + Terminal.reset + " ", terminator: "")
+        let colorPrefix = (isActiveLine || isSelectedLine)
+          ? Terminal.bold + Terminal.ansiBlue209
+          : Terminal.grey
+        print(colorPrefix + String(format: "%4d", lineNum) + Terminal.reset + " ", terminator: "")
       } else {
         print(String(repeating: " ", count: 5), terminator: "")
       }
@@ -181,9 +189,14 @@ func drawEditor(state: inout EditorState) {
 
   // Footer
   let status = makeStatusLine(state: state)
-  let statusPadding = max(0, termWidth - status.text.count)
-  let rightAlignedStatus = String(repeating: " ", count: statusPadding) + status.text
-  print(status.color + rightAlignedStatus + Terminal.reset)
+  let (controlHints, controlHintsLength) = makeControlHints()
+  let statusText = status.text
+  let totalLength = 1 + controlHintsLength + 1 + statusText.count + 1
+  let padding = max(0, termWidth - totalLength)
+  let footerLine =
+    " " + controlHints + String(repeating: " ", count: padding + 1) + status.color + statusText
+    + Terminal.reset + " "
+  print(footerLine)
 
   // Place cursor only when it is within the visible text region
   let cursorVisibleInView =
@@ -204,13 +217,13 @@ private func makeStatusLine(state: EditorState) -> (text: String, color: String)
   let currentLine = state.cursorLine + 1
 
   guard state.hasSelection, let startSel = state.selectionStart, let endSel = state.selectionEnd else {
-    return ("Ln \(currentLine), Col \(state.cursorColumn + 1)", Terminal.grey)
+    return ("ln \(currentLine), col \(state.cursorColumn + 1)", Terminal.grey)
   }
 
   let (start, end) = state.normalizeSelection(start: startSel, end: endSel)
   let lineCount = countSelectedLines(in: state, from: start, to: end)
   let characterCount = countSelectedCharacters(in: state, from: start, to: end)
-  return ("Lns \(lineCount), Chars \(characterCount)", Terminal.grey)
+  return ("lns \(lineCount), chars \(characterCount)", Terminal.grey)
 }
 
 private func countSelectedLines(in state: EditorState, from start: (line: Int, column: Int), to end: (line: Int, column: Int)) -> Int {
@@ -244,4 +257,25 @@ private func lineIsSelected(lineIndex: Int, state: EditorState) -> Bool {
     return lineIndex == start.line
   }
   return lineIndex >= start.line && lineIndex <= end.line
+}
+
+private func makeControlHints() -> (String, Int) {
+  let shortcuts: [(String, String)] = [
+    ("⌃Q", "quit"),
+    ("⌃S", "save"),
+    ("⌃C", "copy"),
+    ("⌃V", "paste")
+  ]
+  let parts = shortcuts.map { hint -> (String, Int) in
+    let textLength = hint.0.count + 1 + hint.1.count
+    let rendered = "\(Terminal.ansiCyan6)\(hint.0)\(Terminal.reset) "
+      + "\(Terminal.brightBlack)\(hint.1)\(Terminal.reset)"
+    return (rendered, textLength)
+  }
+  let separator = "  "
+  let renderedString = parts.enumerated().map { index, element in
+    index == 0 ? element.0 : separator + element.0
+  }.joined()
+  let totalLength = parts.reduce(0) { $0 + $1.1 } + separator.count * max(0, parts.count - 1)
+  return (renderedString, totalLength)
 }

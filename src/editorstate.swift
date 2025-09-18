@@ -27,6 +27,8 @@ struct EditorState {
   var isScrollbarDragging: Bool
   var pinCursorToView: Bool
   var filePath: String?
+  var shouldQuit: Bool
+  var isDirty: Bool
 
   var displayFilename: String {
     if let filePath { return URL(fileURLWithPath: filePath).lastPathComponent }
@@ -53,6 +55,8 @@ struct EditorState {
     self.isScrollbarDragging = false
     self.pinCursorToView = true
     self.filePath = nil
+    self.shouldQuit = false
+    self.isDirty = false
   }
 
   mutating func clampCursor() {

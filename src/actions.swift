@@ -10,6 +10,7 @@ func insertCharacter(_ char: Character, state: inout EditorState) {
   let afterCursor = String(line.dropFirst(safeColumn))
   state.buffer[state.cursorLine] = beforeCursor + String(char) + afterCursor
   state.cursorColumn += 1
+  state.isDirty = true
 }
 
 func insertNewline(state: inout EditorState) {
@@ -25,6 +26,7 @@ func insertNewline(state: inout EditorState) {
   state.cursorLine += 1
   state.cursorColumn = newIndentation.count
   state.clampCursor()
+  state.isDirty = true
 }
 
 func getIndentation(line: String) -> String {
@@ -59,6 +61,7 @@ func backspace(state: inout EditorState) {
     let afterCursor = String(line.dropFirst(safeCursorColumn))
     state.buffer[state.cursorLine] = beforeCursor + afterCursor
     state.cursorColumn -= 1
+    state.isDirty = true
   } else if state.cursorLine > 0 {
     let currentLine = state.buffer[state.cursorLine]
     let previousLine = state.buffer[state.cursorLine - 1]
@@ -66,6 +69,7 @@ func backspace(state: inout EditorState) {
     state.buffer.remove(at: state.cursorLine)
     state.cursorLine -= 1
     state.cursorColumn = previousLine.count
+    state.isDirty = true
   }
   state.clampCursor()
 }
@@ -84,6 +88,7 @@ func forwardDelete(state: inout EditorState) {
       let nextLine = state.buffer[state.cursorLine + 1]
       state.buffer[state.cursorLine] = line + nextLine
       state.buffer.remove(at: state.cursorLine + 1)
+      state.isDirty = true
     }
     state.clampCursor(); return
   }
@@ -92,6 +97,7 @@ func forwardDelete(state: inout EditorState) {
   let afterCursor = String(line.dropFirst(safeColumn + 1))
   state.buffer[state.cursorLine] = beforeCursor + afterCursor
   state.clampCursor()
+  state.isDirty = true
 }
 
 func smartDeleteBackward(state: inout EditorState) {
@@ -104,6 +110,7 @@ func smartDeleteBackward(state: inout EditorState) {
       state.buffer.remove(at: state.cursorLine)
       state.cursorLine -= 1
       state.cursorColumn = previousLine.count
+      state.isDirty = true
     }
     state.clampCursor(); return
   }
@@ -114,6 +121,7 @@ func smartDeleteBackward(state: inout EditorState) {
   state.buffer[state.cursorLine] = String(beforeCursor.prefix(deleteToPosition)) + afterCursor
   state.cursorColumn = deleteToPosition
   state.clampCursor()
+  state.isDirty = true
 }
 
 func findSmartDeletePosition(text: String) -> Int {
@@ -149,6 +157,7 @@ func deleteSelection(state: inout EditorState) {
     state.buffer[startPos.line] = beforeSelection + afterSelection
     state.cursorLine = startPos.line
     state.cursorColumn = safeStartColumn
+    state.isDirty = true
   } else {
     let firstLine = state.buffer[startPos.line]
     let lastLine = state.buffer[endPos.line]
@@ -162,6 +171,7 @@ func deleteSelection(state: inout EditorState) {
     }
     state.cursorLine = startPos.line
     state.cursorColumn = beforeSelection.count
+    state.isDirty = true
   }
   state.clearSelection()
 }
@@ -238,6 +248,7 @@ func deleteToEndOfLine(state: inout EditorState) {
   let beforeCursor = String(line.prefix(safeColumn))
   state.buffer[state.cursorLine] = beforeCursor
   state.clampCursor(); state.showCursor()
+  state.isDirty = true
 }
 
 func jumpWordForward(state: inout EditorState) {
@@ -450,4 +461,5 @@ private func insertText(_ text: String, state: inout EditorState) {
 
   state.clampCursor()
   state.showCursor()
+  state.isDirty = true
 }
