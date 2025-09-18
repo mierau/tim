@@ -27,6 +27,7 @@ struct Tim {
     var remoteURL: URL?
     var readFromStdin = false
     var acceptFlags = true
+    var wikipediaTokens: [String] = []
 
     var index = 0
     while index < args.count {
@@ -40,6 +41,17 @@ struct Tim {
       if acceptFlags && arg == "--version" {
         print("tim version \(version)")
         return
+      }
+
+      if acceptFlags && (arg == "-w" || arg == "--wikipedia") {
+        acceptFlags = false
+        wikipediaTokens.removeAll(keepingCapacity: true)
+        index += 1
+        while index < args.count {
+          wikipediaTokens.append(args[index])
+          index += 1
+        }
+        break
       }
 
       if acceptFlags && arg == "--" {
@@ -82,6 +94,11 @@ struct Tim {
       index += 1
     }
 
+    if !wikipediaTokens.isEmpty && (filePath != nil || remoteURL != nil || readFromStdin) {
+      fputs("Cannot combine -w with other input sources\n", stderr)
+      exit(1)
+    }
+
     if readFromStdin && filePath != nil {
       fputs("Cannot combine '-' with a file path\n", stderr)
       exit(1)
@@ -89,6 +106,16 @@ struct Tim {
 
     if readFromStdin {
       openFromStandardInput(lineNumber: lineNumber)
+      return
+    }
+
+    if !wikipediaTokens.isEmpty {
+      let joined = wikipediaTokens.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+      guard !joined.isEmpty else {
+        fputs("Expected an article name after -w\n", stderr)
+        exit(1)
+      }
+      openWikipediaArticle(named: joined)
       return
     }
 
@@ -217,6 +244,25 @@ struct Tim {
     }
   }
 
+  private static func openWikipediaArticle(named title: String) {
+    do {
+      let article = try fetchWikipediaArticle(title: title)
+      let sanitized = sanitizeContent(article.extract)
+      let buffer = makeBuffer(from: sanitized)
+      let cursor = initialCursor(for: nil, buffer: buffer)
+      let suggestedFilename = wikipediaSuggestedFilename(for: article.title)
+      let cwd = FileManager.default.currentDirectoryPath
+      let savePath = (cwd as NSString).appendingPathComponent(suggestedFilename)
+      EditorController.run(initialBuffer: buffer, filePath: savePath, initialCursor: cursor)
+    } catch let error as WikipediaError {
+      fputs("\(error.localizedDescription)\n", stderr)
+      exit(1)
+    } catch {
+      fputs("Failed to load Wikipedia article '\(title)': \(error)\n", stderr)
+      exit(1)
+    }
+  }
+
   private static func derivedSavePath(for url: URL) -> String {
     var candidate = url.lastPathComponent
     if let decoded = candidate.removingPercentEncoding { candidate = decoded }
@@ -288,6 +334,7 @@ struct Tim {
       tim                       Open an empty buffer
       tim <file>                Open <file>
       tim <http(s) url>         Download URL into a new buffer (UTF-8 text only)
+      tim -w <name>             Open the Wikipedia article matching <name>
       tim <file>:+<line>        Open <file> and jump to <line> (1-based)
       tim +<line> <file>        Jump to <line> after loading <file>
       tim -- <file>             Treat following argument as a literal path
@@ -296,26 +343,6 @@ struct Tim {
       tim --version             Show the current version
     """
     print(usage.trimmingCharacters(in: .whitespacesAndNewlines))
-  }
-}
-
-private extension URLSession {
-  func syncRequest(with url: URL) -> (Data?, URLResponse?, Error?) {
-    let semaphore = DispatchSemaphore(value: 0)
-    var resultData: Data?
-    var resultResponse: URLResponse?
-    var resultError: Error?
-
-    let task = dataTask(with: url) { data, response, error in
-      resultData = data
-      resultResponse = response
-      resultError = error
-      semaphore.signal()
-    }
-
-    task.resume()
-    semaphore.wait()
-    return (resultData, resultResponse, resultError)
   }
 }
 
