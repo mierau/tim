@@ -100,7 +100,22 @@ func drawEditor(state: inout EditorState) {
   let footerLines = 2
   let maxVisibleRows = termSize.rows - headerLines - footerLines
   let contentWidth = termSize.cols - 6
-  let visualRows = state.layoutCache.visualRows(for: state, contentWidth: max(1, contentWidth))
+  let width = max(1, contentWidth)
+
+  var visualRows = state.layoutCache.snapshot(for: state, contentWidth: width).rows
+  if visualRows.isEmpty {
+    let fallbackLine = min(state.cursorLine, max(0, state.buffer.count - 1))
+    visualRows = [VisualRow(lineIndex: fallbackLine, start: 0, end: 0, isFirst: true, isEndOfLine: true)]
+  }
+  let totalRows = max(visualRows.count, 1)
+
+  var maxOffsetActual = max(0, totalRows - maxVisibleRows)
+  if state.visualScrollOffset > maxOffsetActual {
+    state.visualScrollOffset = maxOffsetActual
+  }
+
+  var vScroll = state.visualScrollOffset
+
   let (cursorVIndex, cursorVRow) = findCursorVisualIndex(state: state, rows: visualRows)
   if state.pinCursorToView {
     if cursorVIndex < state.visualScrollOffset {
@@ -108,8 +123,14 @@ func drawEditor(state: inout EditorState) {
     } else if cursorVIndex >= state.visualScrollOffset + maxVisibleRows {
       state.visualScrollOffset = max(0, cursorVIndex - maxVisibleRows + 1)
     }
+    vScroll = state.visualScrollOffset
   }
-  let vScroll = state.visualScrollOffset
+
+  maxOffsetActual = max(0, totalRows - maxVisibleRows)
+  if vScroll > maxOffsetActual {
+    vScroll = maxOffsetActual
+    state.visualScrollOffset = vScroll
+  }
 
   // Header
   let filename = state.displayFilename
@@ -138,8 +159,8 @@ func drawEditor(state: inout EditorState) {
   print(headerLine)
 
   // Body
-  let startV = max(0, min(vScroll, max(0, visualRows.count - 1)))
-  let endV = min(visualRows.count, startV + maxVisibleRows)
+  let startV = max(0, min(vScroll, max(0, totalRows - 1)))
+  let endV = min(totalRows, startV + maxVisibleRows)
   if startV < endV {
     for vi in startV..<endV {
       let vr = visualRows[vi]
@@ -159,7 +180,6 @@ func drawEditor(state: inout EditorState) {
         print(String(repeating: " ", count: 5), terminator: "")
       }
       // Scrollbar
-      let totalRows = visualRows.count
       let trackHeight = maxVisibleRows
       let (handleStart, handleHeight, _) = Scrollbar.compute(
         totalRows: totalRows, trackHeight: trackHeight, offset: state.visualScrollOffset)
@@ -180,8 +200,7 @@ func drawEditor(state: inout EditorState) {
 
   // Fill remaining rows
   let targetRows = startV + maxVisibleRows
-  if endV < targetRows && endV < targetRows {
-    let totalRows = visualRows.count
+  if endV < targetRows {
     let trackHeight = maxVisibleRows
     let (handleStart, handleHeight, _) = Scrollbar.compute(
       totalRows: totalRows, trackHeight: trackHeight, offset: state.visualScrollOffset)

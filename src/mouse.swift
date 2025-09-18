@@ -8,16 +8,18 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
       let headerLines = 1
       let footerLines = 2
       let maxVisibleRows = max(1, termSize.rows - headerLines - footerLines)
-      let vrows = state.layoutCache.visualRows(for: state, contentWidth: contentWidth)
+      let snapshot = state.layoutCache.snapshot(for: state, contentWidth: contentWidth)
+      let totalRows = max(snapshot.rows.count, 1)
       let delta = 1
       var newOffset = state.visualScrollOffset
       if event.button == 64 {
         newOffset = max(0, newOffset - delta)
       } else if event.button == 65 {
-        let maxOffset = max(0, vrows.count - maxVisibleRows)
+        let maxOffset = max(0, totalRows - maxVisibleRows)
         newOffset = min(maxOffset, newOffset + delta)
       }
-      state.visualScrollOffset = newOffset
+      let maxOffset = max(0, totalRows - maxVisibleRows)
+      state.visualScrollOffset = min(max(0, newOffset), maxOffset)
       state.pinCursorToView = false
       state.needsRedraw = true
     }
@@ -34,13 +36,13 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
     if localRow >= 0 {
       let termSize = Terminal.getTerminalSize()
       let contentWidth = max(1, termSize.cols - 6)
+      let headerLines = 1
+      let footerLines = 2
+      let maxVisibleRows = max(1, termSize.rows - headerLines - footerLines)
       let scrollbarColStart = 6 + contentWidth
       if event.x >= scrollbarColStart {
-        let vrows = state.layoutCache.visualRows(for: state, contentWidth: contentWidth)
-        let headerLines = 1
-        let footerLines = 2
-        let maxVisibleRows = max(1, termSize.rows - headerLines - footerLines)
-        let totalRows = vrows.count
+        let snapshot = state.layoutCache.snapshot(for: state, contentWidth: contentWidth)
+        let totalRows = max(snapshot.rows.count, 1)
         let trackHeight = maxVisibleRows
         let (handleStart, handleHeight, maxOffset) = Scrollbar.compute(
           totalRows: totalRows, trackHeight: trackHeight, offset: state.visualScrollOffset)
@@ -53,7 +55,8 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
           return
         case .below:
           let step = Scrollbar.pageStep(trackHeight: trackHeight, fraction: 0.9)
-          state.visualScrollOffset = min(maxOffset, state.visualScrollOffset + step)
+          let desired = min(maxOffset, state.visualScrollOffset + step)
+          state.visualScrollOffset = max(0, min(desired, maxOffset))
           state.pinCursorToView = false
           state.needsRedraw = true
           return
@@ -61,7 +64,8 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
           let pos = min(max(localRow - handleHeight / 2, 0), max(0, trackHeight - handleHeight))
           let newOffset = Int(
             round(Double(pos) / Double(max(1, trackHeight - handleHeight)) * Double(maxOffset)))
-          state.visualScrollOffset = min(maxOffset, max(0, newOffset))
+          let desired = min(maxOffset, max(0, newOffset))
+          state.visualScrollOffset = desired
           state.isScrollbarDragging = true
           state.isDragging = false
           state.selectionMode = .none
@@ -71,7 +75,9 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
         }
       }
       // Text area click
-      let vrows = state.layoutCache.visualRows(for: state, contentWidth: contentWidth)
+      let snapshot = state.layoutCache.snapshot(for: state, contentWidth: contentWidth)
+      let vrows = snapshot.rows
+      guard !vrows.isEmpty else { return }
       let vIndex = min(state.visualScrollOffset + localRow, max(0, vrows.count - 1))
       let vr = vrows[vIndex]
       let targetLine = vr.lineIndex
@@ -182,11 +188,11 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
         if state.isScrollbarDragging {
           let termSize = Terminal.getTerminalSize()
           let contentWidth = max(1, termSize.cols - 6)
-          let vrows = state.layoutCache.visualRows(for: state, contentWidth: contentWidth)
           let headerLines = 1
           let footerLines = 2
           let maxVisibleRows = max(1, termSize.rows - headerLines - footerLines)
-          let totalRows = vrows.count
+          let snapshot = state.layoutCache.snapshot(for: state, contentWidth: contentWidth)
+          let totalRows = max(snapshot.rows.count, 1)
           let trackHeight = maxVisibleRows
           let maxOffset = max(0, totalRows - trackHeight)
           var handleHeight = min(trackHeight, totalRows)
@@ -197,13 +203,16 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
           let pos = min(max(localRow - handleHeight / 2, 0), max(0, trackHeight - handleHeight))
           let denom = max(1, trackHeight - handleHeight)
           let newOffset = Int(round(Double(pos) / Double(denom) * Double(maxOffset)))
-          state.visualScrollOffset = min(maxOffset, max(0, newOffset))
+          let desired = min(maxOffset, max(0, newOffset))
+          state.visualScrollOffset = desired
           state.needsRedraw = true
           return
         }
         let termSize = Terminal.getTerminalSize()
         let contentWidth = max(1, termSize.cols - 6)
-        let vrows = state.layoutCache.visualRows(for: state, contentWidth: contentWidth)
+        let snapshot = state.layoutCache.snapshot(for: state, contentWidth: contentWidth)
+        let vrows = snapshot.rows
+        guard !vrows.isEmpty else { return }
         let vIndex = min(state.visualScrollOffset + localRow, max(0, vrows.count - 1))
         let vr = vrows[vIndex]
         let targetLine = vr.lineIndex

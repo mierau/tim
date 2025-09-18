@@ -9,95 +9,51 @@ struct VisualRow {
 }
 
 struct LayoutCache {
-  private struct LineSpan {
-    var start: Int
-    var count: Int
+  struct Snapshot {
+    let rows: [VisualRow]
   }
 
-  private var contentWidth: Int = -1
-  private var rows: [VisualRow] = []
-  private var spans: [LineSpan] = []
-  private var dirtyLines: Set<Int> = []
+  private var cachedRows: [VisualRow] = []
+  private var cachedWidth: Int = -1
+  private var cachedGeneration: Int = -1
 
   mutating func invalidateAll() {
-    rows.removeAll(keepingCapacity: true)
-    spans.removeAll(keepingCapacity: true)
-    dirtyLines.removeAll(keepingCapacity: true)
-    contentWidth = -1
+    cachedGeneration = -1
   }
 
   mutating func invalidateLines(in range: Range<Int>) {
     if range.isEmpty { return }
-    for line in range {
-      dirtyLines.insert(line)
-    }
+    cachedGeneration = -1
   }
 
-  mutating func visualRows(for state: EditorState, contentWidth: Int) -> [VisualRow] {
+  mutating func snapshot(for state: EditorState, contentWidth: Int) -> Snapshot {
     guard contentWidth > 0 else {
-      invalidateAll()
-      return []
+      cachedRows = []
+      cachedWidth = contentWidth
+      cachedGeneration = state.layoutGeneration
+      return Snapshot(rows: cachedRows)
     }
 
-    if self.contentWidth != contentWidth || spans.count != state.buffer.count {
-      rebuildAll(state: state, width: contentWidth)
-      return rows
+    if cachedWidth != contentWidth || cachedGeneration != state.layoutGeneration {
+      cachedRows = computeRows(for: state.buffer, width: contentWidth)
+      cachedWidth = contentWidth
+      cachedGeneration = state.layoutGeneration
     }
 
-    if !dirtyLines.isEmpty {
-      rebuildDirtyLines(state: state, width: contentWidth)
-    }
-
-    return rows
+    return Snapshot(rows: cachedRows)
   }
 
-  private mutating func rebuildAll(state: EditorState, width: Int) {
-    rows.removeAll(keepingCapacity: true)
-    spans.removeAll(keepingCapacity: true)
-    spans.reserveCapacity(state.buffer.count)
-
-    var startIndex = 0
-    for (lineIndex, line) in state.buffer.enumerated() {
+  private func computeRows(for buffer: [String], width: Int) -> [VisualRow] {
+    var rows: [VisualRow] = []
+    rows.reserveCapacity(buffer.count)
+    for (lineIndex, line) in buffer.enumerated() {
       let lineRows = makeRows(for: line, lineIndex: lineIndex, width: width)
       rows.append(contentsOf: lineRows)
-      spans.append(LineSpan(start: startIndex, count: lineRows.count))
-      startIndex += lineRows.count
     }
-
-    contentWidth = width
-    dirtyLines.removeAll(keepingCapacity: true)
-  }
-
-  private mutating func rebuildDirtyLines(state: EditorState, width: Int) {
-    let sortedLines = dirtyLines.sorted()
-    dirtyLines.removeAll(keepingCapacity: true)
-
-    for lineIndex in sortedLines {
-      guard lineIndex >= 0, lineIndex < state.buffer.count, lineIndex < spans.count else {
-        rebuildAll(state: state, width: width)
-        return
-      }
-
-      let oldSpan = spans[lineIndex]
-      let newRows = makeRows(for: state.buffer[lineIndex], lineIndex: lineIndex, width: width)
-
-      let delta = newRows.count - oldSpan.count
-
-      if oldSpan.count > 0 {
-        rows.removeSubrange(oldSpan.start..<(oldSpan.start + oldSpan.count))
-      }
-      if !newRows.isEmpty {
-        rows.insert(contentsOf: newRows, at: oldSpan.start)
-      }
-
-      spans[lineIndex] = LineSpan(start: oldSpan.start, count: newRows.count)
-
-      if delta != 0 {
-        for idx in (lineIndex + 1)..<spans.count {
-          spans[idx].start += delta
-        }
-      }
+    if rows.isEmpty {
+      rows.append(VisualRow(lineIndex: 0, start: 0, end: 0, isFirst: true, isEndOfLine: true))
     }
+    return rows
   }
 }
 
