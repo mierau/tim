@@ -20,6 +20,7 @@ The Mac-friendly command line text editor.
 - Mac-like ctrl-q shortcut to quit.
 - Open documents over HTTP(S).
 - Open text-friendly versions of Wikipedia articles.
+- Incremental find (`⌃F`) with next/previous (`⌃G`/`⌃R`) and optional `/regex/` search.
 
 ## Installation
 1. Ensure Xcode command line tools or a Swift 5.9+ toolchain is installed.
@@ -58,6 +59,8 @@ Additional flags:
 - `tim --version` shows the current release tag.
 - `tim -` reads buffer contents from standard input (ASCII or UTF-8 text only).
 - Use `--` before a path that begins with `-` to treat it literally.
+
+Find within the current buffer with `⌃F`, advance matches with `⌃G`, move backward with `⌃R`, and press `Esc` (or `⌃F` a second time) to close. After opening the prompt, pressing `⌃F` moves focus to the document so subsequent typing edits the buffer; run `⌃F` once more to exit. Surround the query with `/` characters to run a regular expression, e.g. `/^[A-Z].*/`.
 
 ## Project Layout
 - `src/app.swift` bootstraps CLI parsing, file loading, and Wikipedia/HTTP entry points

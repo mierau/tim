@@ -81,6 +81,20 @@ private func handleCSI(meta: Bool, state: inout EditorState) {
       return
     }
 
+    if state.find.active {
+      if state.find.focus == .field {
+        switch arrow {
+        case 67: state.moveFindCursorRight()
+        case 68: state.moveFindCursorLeft()
+        case 65: state.moveFindSelection(forward: false)
+        case 66: state.moveFindSelection(forward: true)
+        default: break
+        }
+        return
+      }
+      // when focus is document, allow normal handling below
+    }
+
     if meta {
       if arrow == 67 || arrow == 68 {
         handleShiftOptionArrow(arrow, state: &state)

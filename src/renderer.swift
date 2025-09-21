@@ -2,16 +2,32 @@ import Foundation
 
 func renderLineWithSelection(
   lineContent: String, lineIndex: Int, state: EditorState, contentWidth: Int, columnOffset: Int = 0,
-  isEndOfLogicalLine: Bool = true
+  isEndOfLogicalLine: Bool = true, highlightRanges: [Range<Int>] = [], highlightStyle: String? = nil
 ) -> String {
   var output = ""
   let logicalLineLength = state.buffer[lineIndex].count
   var renderedWidth = 0
   var columnIndex = 0
+  let sortedHighlights = highlightRanges.sorted { $0.lowerBound < $1.lowerBound }
+  var highlightIndex = 0
   for char in lineContent {
     let isSelected = state.isPositionSelected(line: lineIndex, column: columnIndex + columnOffset)
     let charString = String(char)
-    output += isSelected ? Terminal.highlight + charString + Terminal.reset : charString
+    let globalColumn = columnIndex + columnOffset
+    var isFindHighlighted = false
+    while highlightIndex < sortedHighlights.count && sortedHighlights[highlightIndex].upperBound <= globalColumn {
+      highlightIndex += 1
+    }
+    if highlightIndex < sortedHighlights.count && sortedHighlights[highlightIndex].contains(globalColumn) {
+      isFindHighlighted = true
+    }
+    if isSelected {
+      output += Terminal.highlight + charString + Terminal.reset
+    } else if isFindHighlighted, let style = highlightStyle {
+      output += style + charString + Terminal.reset
+    } else {
+      output += charString
+    }
     renderedWidth += Terminal.displayWidth(of: char)
     columnIndex += 1
   }
@@ -186,14 +202,22 @@ func drawEditor(state: inout EditorState) {
       let localRow = vi - startV
       let isHandle = handleHeight > 0 && localRow >= handleStart && localRow < handleStart + handleHeight
       let scrollbarChar = isHandle ? (Terminal.scrollbarBG + " " + Terminal.reset) : " "
-      let lineOut =
-        state.hasSelection
-        ? renderLineWithSelection(
-          lineContent: fragment, lineIndex: vr.lineIndex, state: state, contentWidth: contentWidth,
-          columnOffset: vr.start, isEndOfLogicalLine: vr.isEndOfLine)
-        : (
-          fragment + String(
-            repeating: " ", count: max(0, contentWidth - Terminal.displayWidth(of: fragment))))
+      var matchHighlights: [Range<Int>] = []
+      var highlightStyle: String? = nil
+      if state.find.active, state.find.focus == .field, !state.find.query.isEmpty {
+        matchHighlights = state.find.matches.enumerated().compactMap { index, match in
+          guard match.line == vr.lineIndex, index != state.find.currentIndex else { return nil }
+          return match.range
+        }
+        if !matchHighlights.isEmpty {
+          highlightStyle = Terminal.bold + Terminal.ansiBlue209
+        }
+      }
+
+      let lineOut = renderLineWithSelection(
+        lineContent: fragment, lineIndex: vr.lineIndex, state: state, contentWidth: contentWidth,
+        columnOffset: vr.start, isEndOfLogicalLine: vr.isEndOfLine, highlightRanges: matchHighlights,
+        highlightStyle: highlightStyle)
       print(lineOut + scrollbarChar)
     }
   }
@@ -215,38 +239,109 @@ func drawEditor(state: inout EditorState) {
 
   // Footer
   let status = makeStatusLine(state: state)
-  let (controlHints, controlHintsLength) = makeControlHints()
+  var controlHints: String
+  var controlHintsLength: Int
+  if state.find.active {
+    var info = ""
+    if let error = state.find.regexError {
+      info = "regex error: \(error)"
+    } else if !state.find.query.isEmpty {
+      info = state.find.matches.isEmpty
+        ? "no matches"
+        : "\(state.find.currentIndex + 1)/\(state.find.matches.count)"
+    }
+    let plain = info.isEmpty
+      ? "⌃F focus  ⌃G next  ⌃R prev  Esc close"
+      : "⌃F focus  ⌃G next  ⌃R prev  Esc close  \(info)"
+    controlHints =
+      "\(Terminal.ansiCyan6)⌃F\(Terminal.reset) \(Terminal.brightBlack)focus\(Terminal.reset)  "
+      + "\(Terminal.ansiCyan6)⌃G\(Terminal.reset) \(Terminal.brightBlack)next\(Terminal.reset)  "
+      + "\(Terminal.ansiCyan6)⌃R\(Terminal.reset) \(Terminal.brightBlack)prev\(Terminal.reset)  "
+      + "\(Terminal.ansiCyan6)Esc\(Terminal.reset) \(Terminal.brightBlack)close\(Terminal.reset)"
+      + (info.isEmpty ? "" : "  \(Terminal.brightBlack)\(info)\(Terminal.reset)")
+    controlHintsLength = Terminal.displayWidth(of: plain)
+  } else {
+    let hints = makeControlHints()
+    controlHints = hints.0
+    controlHintsLength = hints.1
+  }
+
   let statusText = status.text
   let statusDisplayWidth = Terminal.displayWidth(of: statusText)
-  let totalLength = 1 + controlHintsLength + 1 + statusDisplayWidth + 1
-  let padding = max(0, termWidth - totalLength)
-  let footerLine =
-    " " + controlHints + String(repeating: " ", count: padding + 1) + status.color + statusText
-    + Terminal.reset + " "
-  print(footerLine)
 
-  // Place cursor only when it is within the visible text region
-  let cursorVisibleInView =
-    maxVisibleRows > 0 && cursorVIndex >= vScroll && cursorVIndex < vScroll + maxVisibleRows
-  if cursorVisibleInView {
-    let displayRow = 2 + (cursorVIndex - vScroll)
-    let line = state.buffer[state.cursorLine]
-    let safeStart = min(cursorVRow.start, line.count)
-    let safeCursor = min(state.cursorColumn, line.count)
-    let rowStartIndex = line.index(line.startIndex, offsetBy: safeStart)
-    let cursorIndex = line.index(line.startIndex, offsetBy: safeCursor)
-    let prefix = String(line[rowStartIndex..<cursorIndex])
-    let cursorVisualOffset = Terminal.displayWidth(of: prefix)
-    let displayCol = 6 + cursorVisualOffset
-    print(Terminal.moveCursor(to: displayRow, col: displayCol), terminator: "")
-    print(state.cursorVisible ? Terminal.showCursor : Terminal.hideCursor, terminator: "")
+  if state.find.active {
+    let leftWidth = statusDisplayWidth
+    let rightWidth = controlHintsLength
+    let spacing = max(1, termWidth - 2 - leftWidth - rightWidth)
+    let footerRow = termSize.rows
+    let footerLine = " " + status.color + statusText + Terminal.reset
+      + String(repeating: " ", count: spacing) + controlHints
+    print(Terminal.moveCursor(to: footerRow, col: 1) + footerLine, terminator: "")
+
+    if state.find.focus == .field {
+      let promptPrefix = "Find: "
+      let prefixWidth = Terminal.displayWidth(of: promptPrefix)
+      let caretIndex = state.find.query.index(state.find.query.startIndex, offsetBy: state.find.cursorPosition)
+      let caretSubstring = String(state.find.query[..<caretIndex])
+      let caretOffset = Terminal.displayWidth(of: caretSubstring)
+      let caretColumn = 2 + prefixWidth + caretOffset
+      print(Terminal.moveCursor(to: footerRow, col: max(1, min(termWidth, caretColumn))), terminator: "")
+      print(state.find.cursorVisible ? Terminal.showCursor : Terminal.hideCursor, terminator: "")
+    } else {
+      let cursorVisibleInView =
+        maxVisibleRows > 0 && cursorVIndex >= vScroll && cursorVIndex < vScroll + maxVisibleRows
+      if cursorVisibleInView {
+        let displayRow = 2 + (cursorVIndex - vScroll)
+        let line = state.buffer[state.cursorLine]
+        let safeStart = min(cursorVRow.start, line.count)
+        let safeCursor = min(state.cursorColumn, line.count)
+        let rowStartIndex = line.index(line.startIndex, offsetBy: safeStart)
+        let cursorIndex = line.index(line.startIndex, offsetBy: safeCursor)
+        let prefix = String(line[rowStartIndex..<cursorIndex])
+        let cursorVisualOffset = Terminal.displayWidth(of: prefix)
+        let displayCol = 6 + cursorVisualOffset
+        print(Terminal.moveCursor(to: displayRow, col: displayCol), terminator: "")
+        print(state.cursorVisible ? Terminal.showCursor : Terminal.hideCursor, terminator: "")
+      } else {
+        print(Terminal.hideCursor, terminator: "")
+      }
+    }
   } else {
-    print(Terminal.hideCursor, terminator: "")
+    let totalLength = 1 + controlHintsLength + 1 + statusDisplayWidth + 1
+    let padding = max(0, termWidth - totalLength)
+    let footerRow = termSize.rows
+    let footerLine =
+      " " + controlHints + String(repeating: " ", count: padding + 1) + status.color + statusText
+      + Terminal.reset
+    print(Terminal.moveCursor(to: footerRow, col: 1) + footerLine, terminator: "")
+
+    let cursorVisibleInView =
+      maxVisibleRows > 0 && cursorVIndex >= vScroll && cursorVIndex < vScroll + maxVisibleRows
+    if cursorVisibleInView {
+      let displayRow = 2 + (cursorVIndex - vScroll)
+      let line = state.buffer[state.cursorLine]
+      let safeStart = min(cursorVRow.start, line.count)
+      let safeCursor = min(state.cursorColumn, line.count)
+      let rowStartIndex = line.index(line.startIndex, offsetBy: safeStart)
+      let cursorIndex = line.index(line.startIndex, offsetBy: safeCursor)
+      let prefix = String(line[rowStartIndex..<cursorIndex])
+      let cursorVisualOffset = Terminal.displayWidth(of: prefix)
+      let displayCol = 6 + cursorVisualOffset
+      print(Terminal.moveCursor(to: displayRow, col: displayCol), terminator: "")
+      print(state.cursorVisible ? Terminal.showCursor : Terminal.hideCursor, terminator: "")
+    } else {
+      print(Terminal.hideCursor, terminator: "")
+    }
   }
   fflush(stdout)
 }
 
 private func makeStatusLine(state: EditorState) -> (text: String, color: String) {
+  if state.find.active {
+    let prefix = state.find.focus == .document ? "Find ▷ " : "Find: "
+    return ("\(prefix)\(state.find.query)", state.find.regexError == nil ? Terminal.grey : Terminal.red)
+  }
+
   let currentLine = state.cursorLine + 1
 
   guard state.hasSelection, let startSel = state.selectionStart, let endSel = state.selectionEnd else {

@@ -18,11 +18,15 @@ struct LayoutCache {
   private var cachedGeneration: Int = -1
 
   mutating func invalidateAll() {
+    cachedRows.removeAll(keepingCapacity: true)
+    cachedWidth = -1
     cachedGeneration = -1
   }
 
   mutating func invalidateLines(in range: Range<Int>) {
     if range.isEmpty { return }
+    cachedRows.removeAll(keepingCapacity: true)
+    cachedWidth = -1
     cachedGeneration = -1
   }
 

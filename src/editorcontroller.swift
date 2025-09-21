@@ -60,13 +60,25 @@ enum EditorController {
       while true {
         let key = readKeyWithTimeout()
         if key == -1 { break }
-        editorState.needsRedraw = true
-        switch key {
-        case 17: running = false
-        case 3: copySelection(state: &editorState)
-        case 24: cutSelection(state: &editorState)
-        case 22: pasteClipboard(state: &editorState)
-        case 19: saveDocument(state: &editorState)
+      editorState.needsRedraw = true
+      if editorState.find.active, handleFindKey(key: key, state: &editorState) {
+        continue
+      }
+
+      switch key {
+      case 17: running = false
+      case 3: copySelection(state: &editorState)
+      case 24: cutSelection(state: &editorState)
+      case 22: pasteClipboard(state: &editorState)
+      case 19: saveDocument(state: &editorState)
+      case 6:
+        editorState.enterFindMode()
+      case 7:
+        if editorState.find.active {
+          editorState.moveFindSelection(forward: true)
+        }
+      case 27:
+        handleEscapeSequence(state: &editorState)
         case 26: undo(state: &editorState)
         case 25: redo(state: &editorState)
         case 13, 10: insertNewline(state: &editorState)
@@ -79,14 +91,19 @@ enum EditorController {
         case 23: smartDeleteBackward(state: &editorState)
         case 21: selectLineUp(state: &editorState)
         case 4: selectLineDown(state: &editorState)
-        case 27: handleEscapeSequence(state: &editorState)
-        default:
-          if key >= 32, let char = decodeInputCharacter(startingWith: key) {
-            if char == "[" {
-              let nextKey = readKeyWithTimeout()
-              if nextKey == 65 || nextKey == 66 || nextKey == 67 || nextKey == 68 {
-                continue
-              } else if nextKey != -1, let nextChar = decodeInputCharacter(startingWith: nextKey) {
+      default:
+        if editorState.find.active && editorState.find.focus == .field {
+          if let char = decodeInputCharacter(startingWith: key) {
+            editorState.appendFindCharacter(char)
+          }
+          continue
+        }
+        if key >= 32, let char = decodeInputCharacter(startingWith: key) {
+          if char == "[" {
+            let nextKey = readKeyWithTimeout()
+            if nextKey == 65 || nextKey == 66 || nextKey == 67 || nextKey == 68 {
+              continue
+            } else if nextKey != -1, let nextChar = decodeInputCharacter(startingWith: nextKey) {
                 insertCharacter(char, state: &editorState)
                 insertCharacter(nextChar, state: &editorState)
               } else {
@@ -148,5 +165,56 @@ private enum TerminalSignalGuard {
     for sig in signalsToHandle {
       signal(sig, signalHandler)
     }
+  }
+}
+
+private func handleFindKey(key: Int, state: inout EditorState) -> Bool {
+  switch key {
+  case 6:  // Ctrl-F toggle focus / close
+    if state.find.focus == .field {
+      state.setFindFocus(.document)
+    } else {
+      state.exitFindMode()
+    }
+    return true
+  case 7:  // Ctrl-G next match
+    state.moveFindSelection(forward: true)
+    return true
+  case 18:  // Ctrl-R previous match (fallback when Shift+Ctrl+G unavailable)
+    state.moveFindSelection(forward: false)
+    return true
+  case 27:  // Escape
+    let peek = peekKeyWithTimeout()
+    if peek == -1 {
+      state.exitFindMode()
+      return true
+    } else {
+      return false
+    }
+  case 127, 8:  // Backspace
+    if state.find.focus == .field { state.deleteFindBackward(); return true }
+    return false
+  case 4:  // Ctrl-D delete forward
+    if state.find.focus == .field { state.deleteFindForward(); return true }
+    return false
+  case 1:  // Ctrl-A start
+    if state.find.focus == .field { state.moveFindCursorToStart(); return true }
+    return false
+  case 5:  // Ctrl-E end
+    if state.find.focus == .field { state.moveFindCursorToEnd(); return true }
+    return false
+  case 13, 10:  // Enter moves forward
+    if state.find.focus == .field {
+      state.moveFindSelection(forward: true)
+      return true
+    }
+    return false
+  default:
+    if state.find.focus == .field, let char = decodeInputCharacter(startingWith: key) {
+      if char == "\n" || char == "\r" { return true }
+      state.appendFindCharacter(char)
+      return true
+    }
+    return false
   }
 }

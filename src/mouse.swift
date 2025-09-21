@@ -85,6 +85,9 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
       let targetColumn = min(vr.start + editorCol, line.count)
       state.isScrollbarDragging = false
       if event.isPress {
+        if state.find.active {
+          state.setFindFocus(.document)
+        }
         state.pinCursorToView = false
         let now = Date()
         if event.hasShift {

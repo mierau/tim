@@ -82,6 +82,15 @@ func readKeyWithTimeout() -> Int {
   return result > 0 ? Int(byte) : -1
 }
 
+func peekKeyWithTimeout() -> Int {
+  let value = readKeyWithTimeout()
+  if value != -1 {
+    let clamped = UInt8(truncatingIfNeeded: value)
+    pendingBytes.insert(clamped, at: 0)
+  }
+  return value
+}
+
 func decodeInputCharacter(startingWith value: Int) -> Character? {
   guard value >= 0 && value <= 255 else { return nil }
   let firstByte = UInt8(value)
