@@ -79,8 +79,14 @@ enum EditorController {
         }
       case 27:
         handleEscapeSequence(state: &editorState)
-        case 26: undo(state: &editorState)
-        case 25: redo(state: &editorState)
+      case 26:
+        if editorState.focusedControl != .findField {
+          undo(state: &editorState)
+        }
+      case 25:
+        if editorState.focusedControl != .findField {
+          redo(state: &editorState)
+        }
         case 13, 10: insertNewline(state: &editorState)
         case 127, 8: backspace(state: &editorState)
         case 9: insertTab(state: &editorState)
@@ -92,7 +98,7 @@ enum EditorController {
         case 21: selectLineUp(state: &editorState)
         case 4: selectLineDown(state: &editorState)
       default:
-        if editorState.find.active && editorState.find.focus == .field {
+        if editorState.find.active && editorState.focusedControl == .findField, key >= 32 {
           if let char = decodeInputCharacter(startingWith: key) {
             editorState.appendFindCharacter(char)
           }
@@ -171,11 +177,7 @@ private enum TerminalSignalGuard {
 private func handleFindKey(key: Int, state: inout EditorState) -> Bool {
   switch key {
   case 6:  // Ctrl-F toggle focus / close
-    if state.find.focus == .field {
-      state.setFindFocus(.document)
-    } else {
-      state.exitFindMode()
-    }
+    state.exitFindMode()
     return true
   case 7:  // Ctrl-G next match
     state.moveFindSelection(forward: true)
@@ -192,25 +194,37 @@ private func handleFindKey(key: Int, state: inout EditorState) -> Bool {
       return false
     }
   case 127, 8:  // Backspace
-    if state.find.focus == .field { state.deleteFindBackward(); return true }
+    if state.focusedControl == .findField { state.deleteFindBackward(); return true }
+    return false
+  case 9:  // Tab
+    if state.focusedControl == .findField {
+      state.setFocus(.document)
+      return true
+    }
     return false
   case 4:  // Ctrl-D delete forward
-    if state.find.focus == .field { state.deleteFindForward(); return true }
+    if state.focusedControl == .findField { state.deleteFindForward(); return true }
     return false
   case 1:  // Ctrl-A start
-    if state.find.focus == .field { state.moveFindCursorToStart(); return true }
+    if state.focusedControl == .findField {
+      state.find.field.selectAll()
+      state.markFindCursorMoved()
+      return true
+    }
     return false
   case 5:  // Ctrl-E end
-    if state.find.focus == .field { state.moveFindCursorToEnd(); return true }
+    if state.focusedControl == .findField { state.moveFindCursorToEnd(); return true }
     return false
   case 13, 10:  // Enter moves forward
-    if state.find.focus == .field {
+    if state.focusedControl == .findField {
       state.moveFindSelection(forward: true)
       return true
     }
     return false
   default:
-    if state.find.focus == .field, let char = decodeInputCharacter(startingWith: key) {
+    if state.focusedControl == .findField, key >= 32,
+      let char = decodeInputCharacter(startingWith: key)
+    {
       if char == "\n" || char == "\r" { return true }
       state.appendFindCharacter(char)
       return true

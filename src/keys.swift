@@ -5,7 +5,11 @@ func handleEscapeSequence(state: inout EditorState) {
   if next1 == -1 { return }
 
   if next1 == 127 || next1 == 8 {
-    smartDeleteBackward(state: &state)
+    if state.find.active && state.focusedControl == .findField {
+      state.deleteFindWordBackward()
+    } else {
+      smartDeleteBackward(state: &state)
+    }
     return
   }
 
@@ -17,14 +21,16 @@ func handleEscapeSequence(state: inout EditorState) {
     let next2 = readKey()
     if next2 == -1 { return }
     if next2 == 91 {
-      handleCSI(meta: true, state: &state)
+      let peek = peekKeyWithTimeout()
+      let inferredShift = (peek == 91)
+      handleCSI(meta: true, assumedShift: inferredShift, state: &state)
       return
     }
     if next2 == 27 {
       let next3 = readKey()
       if next3 == -1 { return }
       if next3 == 91 {
-        handleCSI(meta: true, state: &state)
+        handleCSI(meta: true, assumedShift: true, state: &state)
         return
       }
       if handleOptionWord(byte: next3, shift: isUppercaseLetter(next3), state: &state) {
@@ -44,7 +50,7 @@ func handleEscapeSequence(state: inout EditorState) {
   }
 }
 
-private func handleCSI(meta: Bool, state: inout EditorState) {
+private func handleCSI(meta: Bool, assumedShift: Bool = false, state: inout EditorState) {
   let value = readKey()
   if value == -1 { return }
 
@@ -62,6 +68,9 @@ private func handleCSI(meta: Bool, state: inout EditorState) {
       moveToBeginningOfLine(state: &state)
     }
     return
+  case 91:
+    handleCSI(meta: meta, assumedShift: assumedShift, state: &state)
+    return
   case 51:
     if readKey() == 126 { forwardDelete(state: &state) }
     return
@@ -77,22 +86,46 @@ private func handleCSI(meta: Bool, state: inout EditorState) {
   case 65, 66, 67, 68:
     let arrow = value
 
+    if meta, state.find.active, state.focusedControl == .findField {
+      state.isFindFieldDragging = false
+      let isWordArrow = (arrow == 67 || arrow == 68)
+      let expandSelection = assumedShift || isWordArrow
+      state.isFindFieldWordSelection = isWordArrow && expandSelection
+      switch arrow {
+      case 67:
+        state.moveFindCursorWordRight(expandSelection: expandSelection)
+      case 68:
+        state.moveFindCursorWordLeft(expandSelection: expandSelection)
+      case 65:
+        state.moveFindCursorToStart(expandSelection: expandSelection)
+      case 66:
+        state.moveFindCursorToEnd(expandSelection: expandSelection)
+      default:
+        break
+      }
+      return
+    }
+
     if readOptionalModifier(after: arrow, forcedAlt: meta, state: &state) {
       return
     }
 
-    if state.find.active {
-      if state.find.focus == .field {
-        switch arrow {
-        case 67: state.moveFindCursorRight()
-        case 68: state.moveFindCursorLeft()
-        case 65: state.moveFindSelection(forward: false)
-        case 66: state.moveFindSelection(forward: true)
-        default: break
-        }
-        return
+    if state.find.active, state.focusedControl == .findField, !meta {
+      state.isFindFieldWordSelection = false
+      state.isFindFieldDragging = false
+      switch arrow {
+      case 67:
+        state.moveFindCursorRight()
+      case 68:
+        state.moveFindCursorLeft()
+      case 65:
+        state.moveFindCursorToStart()
+      case 66:
+        state.moveFindCursorToEnd()
+      default:
+        break
       }
-      // when focus is document, allow normal handling below
+      return
     }
 
     if meta {
@@ -293,6 +326,21 @@ private func handleShiftOptionArrow(_ arrow: Int, state: inout EditorState) {
 private func handleOptionWord(byte: Int, shift: Bool, state: inout EditorState) -> Bool {
   guard byte >= 0 && byte <= 255 else { return false }
   let lower = byte | 0x20
+  if state.find.active && state.focusedControl == .findField {
+    switch lower {
+    case 102:
+      state.moveFindCursorWordRight(expandSelection: shift)
+      state.isFindFieldWordSelection = shift
+      state.isFindFieldDragging = false
+    case 98:
+      state.moveFindCursorWordLeft(expandSelection: shift)
+      state.isFindFieldWordSelection = shift
+      state.isFindFieldDragging = false
+    default:
+      return false
+    }
+    return true
+  }
   switch lower {
   case 102:  // 'f'
     if shift {
@@ -360,6 +408,14 @@ private func routeModifiedArrow(modifier: Int, arrow: Int, forcedAlt: Bool = fal
   let hasAlt = forcedAlt || (rawBits & 2) != 0
   let hasCtrl = (rawBits & 4) != 0
 
+  if state.find.active && state.focusedControl == .findField {
+    if routeFindFieldModifiedArrow(
+      hasShift: hasShift, hasAlt: hasAlt, hasCtrl: hasCtrl, arrow: arrow, state: &state)
+    {
+      return true
+    }
+  }
+
   if hasAlt && hasShift && !hasCtrl {
     handleShiftOptionArrow(arrow, state: &state)
     return true
@@ -380,6 +436,66 @@ private func routeModifiedArrow(modifier: Int, arrow: Int, forcedAlt: Bool = fal
     return true
   }
 
+  return false
+}
+
+@discardableResult
+private func routeFindFieldModifiedArrow(
+  hasShift: Bool, hasAlt: Bool, hasCtrl: Bool, arrow: Int, state: inout EditorState
+) -> Bool {
+  if hasCtrl { return false }
+  if hasAlt {
+    switch arrow {
+    case 67:
+      state.moveFindCursorWordRight(expandSelection: hasShift)
+      state.isFindFieldWordSelection = hasShift
+      state.isFindFieldDragging = false
+      return true
+    case 68:
+      state.moveFindCursorWordLeft(expandSelection: hasShift)
+      state.isFindFieldWordSelection = hasShift
+      state.isFindFieldDragging = false
+      return true
+    case 65:
+      state.moveFindCursorToStart(expandSelection: hasShift)
+      state.isFindFieldWordSelection = false
+      state.isFindFieldDragging = false
+      return true
+    case 66:
+      state.moveFindCursorToEnd(expandSelection: hasShift)
+      state.isFindFieldWordSelection = false
+      state.isFindFieldDragging = false
+      return true
+    default:
+      return false
+    }
+  }
+  if hasShift {
+    switch arrow {
+    case 67:
+      state.moveFindCursorRight(expandSelection: true)
+      state.isFindFieldWordSelection = false
+      state.isFindFieldDragging = false
+      return true
+    case 68:
+      state.moveFindCursorLeft(expandSelection: true)
+      state.isFindFieldWordSelection = false
+      state.isFindFieldDragging = false
+      return true
+    case 65:
+      state.moveFindCursorToStart(expandSelection: true)
+      state.isFindFieldWordSelection = false
+      state.isFindFieldDragging = false
+      return true
+    case 66:
+      state.moveFindCursorToEnd(expandSelection: true)
+      state.isFindFieldWordSelection = false
+      state.isFindFieldDragging = false
+      return true
+    default:
+      return false
+    }
+  }
   return false
 }
 

@@ -69,8 +69,21 @@ struct EditorState {
       case document
     }
 
+    struct FindFieldLayout {
+      struct Column {
+        let index: Int
+        let columnRange: Range<Int>
+      }
+
+      let fieldStartColumn: Int
+      let fieldEndColumn: Int
+      var clickableFieldEndColumn: Int
+      let caretColumn: Int
+      let columns: [Column]
+    }
+
     var active: Bool = false
-    var query: String = ""
+    var field: TextFieldState = TextFieldState()
     var useRegex: Bool = false
     var regexError: String?
     var matches: [FindMatch] = []
@@ -78,10 +91,13 @@ struct EditorState {
     var originalCursor: (line: Int, column: Int)?
     var originalSelectionStart: (line: Int, column: Int)?
     var originalSelectionEnd: (line: Int, column: Int)?
-    var cursorPosition: Int = 0
     var focus: Focus = .field
     var cursorVisible: Bool = true
     var lastBlinkTime: Date = Date()
+    var lastLayout: FindFieldLayout? = nil
+    var lastClickTime: Date? = nil
+    var lastClickIndex: Int? = nil
+    var lastClickCount: Int = 0
   }
 
   var buffer: [String]
@@ -99,6 +115,8 @@ struct EditorState {
   var selectionEnd: (line: Int, column: Int)?
   var needsRedraw: Bool
   var isDragging: Bool
+  var isFindFieldDragging: Bool
+  var isFindFieldWordSelection: Bool
   var selectionMode: SelectionMode
   var isScrollbarDragging: Bool
   var pinCursorToView: Bool
@@ -113,6 +131,7 @@ struct EditorState {
   var layoutCache: LayoutCache
   var layoutGeneration: Int
   var find: FindState
+  var focusedControl: FocusTarget
 
   var displayFilename: String {
     if let filePath { return URL(fileURLWithPath: filePath).lastPathComponent }
@@ -134,6 +153,8 @@ struct EditorState {
     self.selectionEnd = nil
     self.needsRedraw = true
     self.isDragging = false
+    self.isFindFieldDragging = false
+    self.isFindFieldWordSelection = false
     self.selectionMode = .none
     self.visualScrollOffset = 0
     self.isScrollbarDragging = false
@@ -149,6 +170,40 @@ struct EditorState {
     self.layoutCache = LayoutCache()
     self.layoutGeneration = 0
     self.find = FindState()
+    self.find.focus = .document
+    self.focusedControl = .document
+  }
+
+  mutating func setFocus(_ target: FocusTarget) {
+    isFindFieldDragging = false
+    isFindFieldWordSelection = false
+    if target == .findField {
+      clearSelection()
+      selectionMode = .none
+    } else {
+      find.field.clearSelection()
+      find.lastClickTime = nil
+      find.lastClickIndex = nil
+      find.lastClickCount = 0
+    }
+    if focusedControl == target { return }
+    focusedControl = target
+    if find.active {
+      let mapped: FindState.Focus = (target == .findField) ? .field : .document
+      if find.focus != mapped {
+        find.focus = mapped
+      }
+      if mapped == .field {
+        find.cursorVisible = true
+        find.lastBlinkTime = Date()
+      } else {
+        cursorVisible = true
+        lastBlinkTime = Date()
+      }
+    } else {
+      find.focus = .document
+    }
+    needsRedraw = true
   }
 
   mutating func clampCursor() {
@@ -166,7 +221,17 @@ struct EditorState {
       }
       return
     }
-    if find.active && find.focus == .field {
+
+    if find.active && find.field.hasSelection {
+      if find.cursorVisible {
+        find.cursorVisible = false
+        needsRedraw = true
+      }
+      if focusedControl == .findField {
+        return
+      }
+    }
+    if find.active && focusedControl == .findField {
       let now = Date()
       if now.timeIntervalSince(find.lastBlinkTime) > 0.5 {
         find.cursorVisible.toggle()
@@ -252,7 +317,7 @@ struct EditorState {
       layoutCache.invalidateAll()
     }
     refreshDirtyFlag()
-    if find.active, !find.query.isEmpty {
+    if find.active, !find.field.text.isEmpty {
       recomputeFindMatches()
     }
   }
@@ -262,7 +327,7 @@ extension EditorState {
   mutating func enterFindMode() {
     guard !find.active else { return }
     find.active = true
-    find.query = ""
+    find.field = TextFieldState()
     find.useRegex = false
     find.regexError = nil
     find.matches = []
@@ -270,11 +335,16 @@ extension EditorState {
     find.originalCursor = (cursorLine, cursorColumn)
     find.originalSelectionStart = selectionStart
     find.originalSelectionEnd = selectionEnd
-    find.cursorPosition = 0
     find.focus = .field
     find.cursorVisible = true
     find.lastBlinkTime = Date()
-    needsRedraw = true
+    find.lastLayout = nil
+    find.lastClickTime = nil
+    find.lastClickIndex = nil
+    find.lastClickCount = 0
+    isFindFieldDragging = false
+    isFindFieldWordSelection = false
+    setFocus(.findField)
   }
 
   mutating func exitFindMode(restoreSelection: Bool = true) {
@@ -292,36 +362,42 @@ extension EditorState {
     }
     selectionMode = .none
     find = FindState()
+    find.focus = .document
+    find.lastLayout = nil
+    isFindFieldDragging = false
+    isFindFieldWordSelection = false
+    focusedControl = .document
     pinCursorToView = true
     needsRedraw = true
   }
 
   mutating func appendFindCharacter(_ char: Character) {
-    guard find.active, find.focus == .field else { return }
-    let insertIndex = find.query.index(find.query.startIndex, offsetBy: find.cursorPosition)
-    find.query.insert(char, at: insertIndex)
-    find.cursorPosition += 1
+    guard find.active, focusedControl == .findField else { return }
+    find.field.insert(char)
     find.cursorVisible = true
     find.lastBlinkTime = Date()
     recomputeFindMatches()
   }
 
   mutating func deleteFindBackward() {
-    guard find.active, find.focus == .field, find.cursorPosition > 0 else { return }
-    let removeIndex = find.query.index(find.query.startIndex, offsetBy: find.cursorPosition)
-    let beforeIndex = find.query.index(before: removeIndex)
-    find.query.removeSubrange(beforeIndex..<removeIndex)
-    find.cursorPosition -= 1
+    guard find.active, focusedControl == .findField else { return }
+    find.field.deleteBackward()
     find.cursorVisible = true
     find.lastBlinkTime = Date()
     recomputeFindMatches()
   }
 
   mutating func deleteFindForward() {
-    guard find.active, find.focus == .field, find.cursorPosition < find.query.count else { return }
-    let start = find.query.index(find.query.startIndex, offsetBy: find.cursorPosition)
-    let end = find.query.index(after: start)
-    find.query.removeSubrange(start..<end)
+    guard find.active, focusedControl == .findField else { return }
+    find.field.deleteForward()
+    find.cursorVisible = true
+    find.lastBlinkTime = Date()
+    recomputeFindMatches()
+  }
+
+  mutating func deleteFindWordBackward() {
+    guard find.active, focusedControl == .findField else { return }
+    find.field.deleteWordBackward()
     find.cursorVisible = true
     find.lastBlinkTime = Date()
     recomputeFindMatches()
@@ -339,13 +415,13 @@ extension EditorState {
 
   mutating func recomputeFindMatches() {
     guard find.active else { return }
-    let trimmed = find.query
+    let trimmed = find.field.text
     if trimmed.isEmpty {
       find.matches = []
       find.regexError = nil
       find.useRegex = false
       find.currentIndex = 0
-      find.cursorPosition = 0
+      find.field.moveCursorToStart()
       find.cursorVisible = true
       find.lastBlinkTime = Date()
       if let origin = find.originalCursor {
@@ -364,7 +440,7 @@ extension EditorState {
     if let _ = computation.errorMessage {
       find.matches = []
       find.currentIndex = 0
-      find.cursorPosition = min(find.cursorPosition, find.query.count)
+      find.field.cursor = min(find.field.cursor, find.field.text.count)
       find.cursorVisible = true
       find.lastBlinkTime = Date()
       selectionStart = nil
@@ -376,7 +452,7 @@ extension EditorState {
     find.matches = computation.matches
     if find.matches.isEmpty {
       find.currentIndex = 0
-      find.cursorPosition = min(find.cursorPosition, find.query.count)
+      find.field.cursor = min(find.field.cursor, find.field.text.count)
       find.cursorVisible = true
       find.lastBlinkTime = Date()
       selectionStart = nil
@@ -385,7 +461,7 @@ extension EditorState {
       return
     }
     find.currentIndex = 0
-    find.cursorPosition = min(find.cursorPosition, find.query.count)
+    find.field.cursor = min(find.field.cursor, find.field.text.count)
     applyCurrentFindMatch()
   }
 
@@ -402,51 +478,65 @@ extension EditorState {
     needsRedraw = true
   }
 
-  mutating func moveFindCursorLeft() {
-    guard find.active, find.focus == .field else { return }
-    find.cursorPosition = max(0, find.cursorPosition - 1)
-    find.cursorVisible = true
-    find.lastBlinkTime = Date()
-    needsRedraw = true
+  mutating func moveFindCursorLeft(expandSelection: Bool = false) {
+    guard find.active, focusedControl == .findField else { return }
+    find.field.moveCursorLeft(expandSelection: expandSelection)
+    markFindCursorMoved()
   }
 
-  mutating func moveFindCursorRight() {
-    guard find.active, find.focus == .field else { return }
-    find.cursorPosition = min(find.cursorPosition + 1, find.query.count)
-    find.cursorVisible = true
-    find.lastBlinkTime = Date()
-    needsRedraw = true
+  mutating func moveFindCursorRight(expandSelection: Bool = false) {
+    guard find.active, focusedControl == .findField else { return }
+    find.field.moveCursorRight(expandSelection: expandSelection)
+    markFindCursorMoved()
   }
 
-  mutating func moveFindCursorToStart() {
-    guard find.active, find.focus == .field else { return }
-    find.cursorPosition = 0
-    find.cursorVisible = true
-    find.lastBlinkTime = Date()
-    needsRedraw = true
+  mutating func moveFindCursorWordLeft(expandSelection: Bool = false) {
+    guard find.active, focusedControl == .findField else { return }
+    find.field.moveCursorWordLeft(expandSelection: expandSelection)
+    markFindCursorMoved()
   }
 
-  mutating func moveFindCursorToEnd() {
-    guard find.active, find.focus == .field else { return }
-    find.cursorPosition = find.query.count
-    find.cursorVisible = true
-    find.lastBlinkTime = Date()
+  mutating func moveFindCursorWordRight(expandSelection: Bool = false) {
+    guard find.active, focusedControl == .findField else { return }
+    find.field.moveCursorWordRight(expandSelection: expandSelection)
+    markFindCursorMoved()
+  }
+
+  mutating func moveFindCursorToStart(expandSelection: Bool = false) {
+    guard find.active, focusedControl == .findField else { return }
+    find.field.moveCursorToStart(expandSelection: expandSelection)
+    markFindCursorMoved()
+  }
+
+  mutating func moveFindCursorToEnd(expandSelection: Bool = false) {
+    guard find.active, focusedControl == .findField else { return }
+    find.field.moveCursorToEnd(expandSelection: expandSelection)
+    markFindCursorMoved()
+  }
+
+  mutating func setFindCursor(_ position: Int, expandSelection: Bool = false) {
+    guard find.active else { return }
+    let wasFieldFocused = focusedControl == .findField
+    find.field.setCursor(position, expandSelection: expandSelection && wasFieldFocused)
+    if !wasFieldFocused { setFocus(.findField) }
+    markFindCursorMoved()
+  }
+
+  mutating func clearFindSelection() {
+    guard find.active else { return }
+    find.field.clearSelection()
     needsRedraw = true
   }
 
   mutating func setFindFocus(_ focus: FindState.Focus) {
     guard find.active else { return }
-    if find.focus != focus {
-      find.focus = focus
-      if focus == .field {
-        find.cursorVisible = true
-        find.lastBlinkTime = Date()
-      } else {
-        cursorVisible = true
-        lastBlinkTime = Date()
-      }
-      needsRedraw = true
-    }
+    setFocus(focus == .field ? .findField : .document)
+  }
+
+  mutating func markFindCursorMoved() {
+    find.cursorVisible = true
+    find.lastBlinkTime = Date()
+    needsRedraw = true
   }
 
   private static func computeFindMatches(buffer: [String], query: String) -> (matches: [FindMatch], useRegex: Bool, errorMessage: String?) {

@@ -1,5 +1,100 @@
 import Foundation
 
+private struct FindFieldRenderResult {
+  let statusText: String
+  let statusWidth: Int
+  let caretOffset: Int
+  let layout: EditorState.FindState.FindFieldLayout
+}
+
+private func buildFindStatus(
+  state: inout EditorState, maxWidth: Int, statusColumnBase: Int, baseColor: String
+) -> FindFieldRenderResult
+{
+  let prefix = "Find: "
+  let prefixWidth = Terminal.displayWidth(of: prefix)
+  let fieldWidth = max(1, maxWidth - prefixWidth)
+
+  let characters = Array(state.find.field.text)
+  let widths = characters.map { max(1, Terminal.displayWidth(of: $0)) }
+  let cursor = min(max(0, state.find.field.cursor), characters.count)
+
+  var viewOffset = min(max(0, state.find.field.viewOffset), characters.count)
+  if cursor < viewOffset { viewOffset = cursor }
+
+  func widthBetween(_ start: Int, _ end: Int) -> Int {
+    guard start < end else { return 0 }
+    var total = 0
+    for idx in start..<end { total += widths[idx] }
+    return total
+  }
+
+  while viewOffset > 0 && widthBetween(viewOffset, cursor) > fieldWidth {
+    viewOffset -= 1
+  }
+  while widthBetween(viewOffset, cursor) > fieldWidth && viewOffset < cursor {
+    viewOffset += 1
+  }
+
+  var visibleEnd = viewOffset
+  var usedWidth = 0
+  while visibleEnd < characters.count {
+    let nextWidth = widths[visibleEnd]
+    if usedWidth + nextWidth > fieldWidth {
+      if usedWidth == 0 {
+        usedWidth += nextWidth
+        visibleEnd += 1
+      }
+      break
+    }
+    usedWidth += nextWidth
+    visibleEnd += 1
+  }
+
+  state.find.field.viewOffset = viewOffset
+
+  let selection = state.find.field.selection
+  var statusText = prefix
+  var columns: [EditorState.FindState.FindFieldLayout.Column] = []
+  var columnPosition = prefixWidth
+
+  for idx in viewOffset..<visibleEnd {
+    let character = characters[idx]
+    let width = widths[idx]
+    let charString = String(character)
+    if selection?.contains(idx) ?? false {
+      statusText += Terminal.reset + Terminal.highlight + charString + Terminal.reset
+      if !baseColor.isEmpty { statusText += baseColor }
+    } else {
+      statusText += charString
+    }
+    let absoluteRange = (statusColumnBase + columnPosition)..<(statusColumnBase + columnPosition + width)
+    columns.append(.init(index: idx, columnRange: absoluteRange))
+    columnPosition += width
+  }
+
+  let caretOffset = prefixWidth + widthBetween(viewOffset, cursor)
+  let statusWidth = prefixWidth + usedWidth
+  let fieldStartColumn = statusColumnBase + prefixWidth
+  let fieldEndColumn = statusColumnBase + columnPosition
+
+  let trailingRange = fieldEndColumn..<(fieldEndColumn + 1)
+  columns.append(.init(index: visibleEnd, columnRange: trailingRange))
+
+  let layout = EditorState.FindState.FindFieldLayout(
+    fieldStartColumn: fieldStartColumn,
+    fieldEndColumn: trailingRange.upperBound,
+    clickableFieldEndColumn: trailingRange.upperBound,
+    caretColumn: statusColumnBase + caretOffset,
+    columns: columns)
+
+  return FindFieldRenderResult(
+    statusText: statusText,
+    statusWidth: statusWidth,
+    caretOffset: caretOffset,
+    layout: layout)
+}
+
 func renderLineWithSelection(
   lineContent: String, lineIndex: Int, state: EditorState, contentWidth: Int, columnOffset: Int = 0,
   isEndOfLogicalLine: Bool = true, highlightRanges: [Range<Int>] = [], highlightStyle: String? = nil
@@ -204,7 +299,7 @@ func drawEditor(state: inout EditorState) {
       let scrollbarChar = isHandle ? (Terminal.scrollbarBG + " " + Terminal.reset) : " "
       var matchHighlights: [Range<Int>] = []
       var highlightStyle: String? = nil
-      if state.find.active, state.find.focus == .field, !state.find.query.isEmpty {
+      if state.find.active, state.focusedControl == .findField, !state.find.field.text.isEmpty {
         matchHighlights = state.find.matches.enumerated().compactMap { index, match in
           guard match.line == vr.lineIndex, index != state.find.currentIndex else { return nil }
           return match.range
@@ -238,54 +333,72 @@ func drawEditor(state: inout EditorState) {
   }
 
   // Footer
-  let status = makeStatusLine(state: state)
   var controlHints: String
   var controlHintsLength: Int
+  var statusText: String
+  var statusColor: String
+  var statusDisplayWidth: Int
+
+  var pendingFindLayout: EditorState.FindState.FindFieldLayout? = nil
+
   if state.find.active {
     var info = ""
     if let error = state.find.regexError {
       info = "regex error: \(error)"
-    } else if !state.find.query.isEmpty {
-      info = state.find.matches.isEmpty
-        ? "no matches"
-        : "\(state.find.currentIndex + 1)/\(state.find.matches.count)"
+    } else if !state.find.field.text.isEmpty {
+      let total = state.find.matches.count
+      if total == 0 {
+        info = "0/0"
+      } else {
+        info = "\(state.find.currentIndex + 1)/\(total)"
+      }
     }
     let plain = info.isEmpty
-      ? "⌃F focus  ⌃G next  ⌃R prev  Esc close"
-      : "⌃F focus  ⌃G next  ⌃R prev  Esc close  \(info)"
+      ? "⌃G next  ⌃R prev  Esc close"
+      : "⌃G next  ⌃R prev  Esc close  \(info)"
     controlHints =
-      "\(Terminal.ansiCyan6)⌃F\(Terminal.reset) \(Terminal.brightBlack)focus\(Terminal.reset)  "
-      + "\(Terminal.ansiCyan6)⌃G\(Terminal.reset) \(Terminal.brightBlack)next\(Terminal.reset)  "
+      "\(Terminal.ansiCyan6)⌃G\(Terminal.reset) \(Terminal.brightBlack)next\(Terminal.reset)  "
       + "\(Terminal.ansiCyan6)⌃R\(Terminal.reset) \(Terminal.brightBlack)prev\(Terminal.reset)  "
       + "\(Terminal.ansiCyan6)Esc\(Terminal.reset) \(Terminal.brightBlack)close\(Terminal.reset)"
       + (info.isEmpty ? "" : "  \(Terminal.brightBlack)\(info)\(Terminal.reset)")
     controlHintsLength = Terminal.displayWidth(of: plain)
+
+    let maxStatusWidth = max(1, termWidth - 2 - controlHintsLength)
+    let baseColor = state.find.regexError == nil ? Terminal.grey : Terminal.red
+    let findRender = buildFindStatus(
+      state: &state, maxWidth: maxStatusWidth, statusColumnBase: 2, baseColor: baseColor)
+    statusText = findRender.statusText
+    statusDisplayWidth = findRender.statusWidth
+    statusColor = baseColor
+    pendingFindLayout = findRender.layout
   } else {
     let hints = makeControlHints()
     controlHints = hints.0
     controlHintsLength = hints.1
+    let status = makeStatusLine(state: state)
+    statusText = status.text
+    statusColor = status.color
+    statusDisplayWidth = Terminal.displayWidth(of: statusText)
+    state.find.lastLayout = nil
   }
-
-  let statusText = status.text
-  let statusDisplayWidth = Terminal.displayWidth(of: statusText)
 
   if state.find.active {
     let leftWidth = statusDisplayWidth
     let rightWidth = controlHintsLength
     let spacing = max(1, termWidth - 2 - leftWidth - rightWidth)
+    if var layout = pendingFindLayout {
+      layout.clickableFieldEndColumn = min(termWidth, layout.fieldEndColumn + spacing)
+      pendingFindLayout = layout
+      state.find.lastLayout = layout
+    }
     let footerRow = termSize.rows
-    let footerLine = " " + status.color + statusText + Terminal.reset
+    let footerLine = " " + statusColor + statusText + Terminal.reset
       + String(repeating: " ", count: spacing) + controlHints
     print(Terminal.moveCursor(to: footerRow, col: 1) + footerLine, terminator: "")
 
-    if state.find.focus == .field {
-      let promptPrefix = "Find: "
-      let prefixWidth = Terminal.displayWidth(of: promptPrefix)
-      let caretIndex = state.find.query.index(state.find.query.startIndex, offsetBy: state.find.cursorPosition)
-      let caretSubstring = String(state.find.query[..<caretIndex])
-      let caretOffset = Terminal.displayWidth(of: caretSubstring)
-      let caretColumn = 2 + prefixWidth + caretOffset
-      print(Terminal.moveCursor(to: footerRow, col: max(1, min(termWidth, caretColumn))), terminator: "")
+    if state.focusedControl == .findField {
+      let caretColumn = max(1, min(termWidth, state.find.lastLayout?.caretColumn ?? termWidth))
+      print(Terminal.moveCursor(to: footerRow, col: caretColumn), terminator: "")
       print(state.find.cursorVisible ? Terminal.showCursor : Terminal.hideCursor, terminator: "")
     } else {
       let cursorVisibleInView =
@@ -311,7 +424,7 @@ func drawEditor(state: inout EditorState) {
     let padding = max(0, termWidth - totalLength)
     let footerRow = termSize.rows
     let footerLine =
-      " " + controlHints + String(repeating: " ", count: padding + 1) + status.color + statusText
+      " " + controlHints + String(repeating: " ", count: padding + 1) + statusColor + statusText
       + Terminal.reset
     print(Terminal.moveCursor(to: footerRow, col: 1) + footerLine, terminator: "")
 
@@ -338,8 +451,8 @@ func drawEditor(state: inout EditorState) {
 
 private func makeStatusLine(state: EditorState) -> (text: String, color: String) {
   if state.find.active {
-    let prefix = state.find.focus == .document ? "Find ▷ " : "Find: "
-    return ("\(prefix)\(state.find.query)", state.find.regexError == nil ? Terminal.grey : Terminal.red)
+    let prefix = state.focusedControl == .document ? "Find ▷ " : "Find: "
+    return ("\(prefix)\(state.find.field.text)", state.find.regexError == nil ? Terminal.grey : Terminal.red)
   }
 
   let currentLine = state.cursorLine + 1

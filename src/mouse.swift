@@ -1,9 +1,9 @@
 import Foundation
 
 func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
+  let termSize = Terminal.getTerminalSize()
   if event.button >= 64 && event.button <= 67 {
     if event.isPress {
-      let termSize = Terminal.getTerminalSize()
       let contentWidth = max(1, termSize.cols - 6)
       let headerLines = 1
       let footerLines = 2
@@ -30,11 +30,102 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
   let baseButton = event.button & 0b11
 
   if baseButton == 0 && !isMotion {
+    if state.find.active,
+      let layout = state.find.lastLayout,
+      event.y == termSize.rows
+    {
+      if !event.isPress {
+        state.isFindFieldDragging = false
+        state.isFindFieldWordSelection = false
+        return
+      }
+
+      let now = Date()
+
+      if event.x < layout.fieldStartColumn {
+        state.setFocus(.findField)
+        let anchor = layout.columns.first?.index ?? 0
+        state.find.field.clearSelection()
+        state.setFindCursor(anchor)
+        state.find.field.beginSelection(at: anchor)
+        state.isFindFieldDragging = true
+        state.isFindFieldWordSelection = false
+        state.find.cursorVisible = true
+        state.find.lastBlinkTime = now
+        state.find.lastClickTime = now
+        state.find.lastClickIndex = anchor
+        state.find.lastClickCount = 1
+        state.needsRedraw = true
+        return
+      }
+
+      if event.x >= layout.fieldStartColumn && event.x < layout.clickableFieldEndColumn {
+        let targetIndex: Int
+        if let column = layout.columns.first(where: { $0.columnRange.contains(event.x) }) {
+          targetIndex = column.index
+        } else {
+          targetIndex = layout.columns.last?.index ?? state.find.field.cursor
+        }
+
+        state.setFocus(.findField)
+
+        if event.hasShift && state.focusedControl == .findField {
+          state.setFindCursor(targetIndex, expandSelection: true)
+          state.isFindFieldDragging = false
+          state.isFindFieldWordSelection = false
+          state.find.cursorVisible = true
+          state.find.lastBlinkTime = now
+          state.find.lastClickTime = now
+          state.find.lastClickIndex = targetIndex
+          state.find.lastClickCount = 1
+          state.needsRedraw = true
+          return
+        }
+
+        var clickCount = 1
+        if let lastTime = state.find.lastClickTime,
+          now.timeIntervalSince(lastTime) <= doubleClickThreshold,
+          let lastIndex = state.find.lastClickIndex,
+          abs(lastIndex - targetIndex) <= 1
+        {
+          clickCount = state.find.lastClickCount + 1
+        }
+
+        if clickCount >= 3 {
+          state.find.field.selectAll()
+          state.isFindFieldDragging = false
+          state.isFindFieldWordSelection = false
+        } else if clickCount == 2 && !state.find.field.text.isEmpty {
+          let maxIndex = max(0, state.find.field.text.count - 1)
+          let selectIndex = max(0, min(maxIndex, targetIndex >= state.find.field.text.count ? targetIndex - 1 : targetIndex))
+          state.find.field.selectWord(at: selectIndex)
+          state.isFindFieldDragging = true
+          state.isFindFieldWordSelection = true
+        } else {
+          state.find.field.clearSelection()
+          state.setFindCursor(targetIndex)
+          state.find.field.beginSelection(at: targetIndex)
+          state.isFindFieldDragging = true
+          state.isFindFieldWordSelection = false
+        }
+
+        state.find.cursorVisible = true
+        state.find.lastBlinkTime = now
+        state.find.lastClickTime = now
+        state.find.lastClickIndex = targetIndex
+        state.find.lastClickCount = clickCount
+        state.needsRedraw = true
+        return
+      }
+
+      state.isFindFieldDragging = false
+      state.isFindFieldWordSelection = false
+      return
+    }
     let contentTop = 2
     let localRow = event.y - contentTop
     let editorCol = max(0, event.x - 6)
     if localRow >= 0 {
-      let termSize = Terminal.getTerminalSize()
       let contentWidth = max(1, termSize.cols - 6)
       let headerLines = 1
       let footerLines = 2
@@ -86,7 +177,7 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
       state.isScrollbarDragging = false
       if event.isPress {
         if state.find.active {
-          state.setFindFocus(.document)
+          state.setFocus(.document)
         }
         state.pinCursorToView = false
         let now = Date()
@@ -183,6 +274,48 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
       }
     }
   } else if baseButton == 0 && isMotion {
+    if state.find.active, state.isFindFieldDragging, let layout = state.find.lastLayout {
+      var clampedX = event.x
+      if clampedX < layout.fieldStartColumn { clampedX = layout.fieldStartColumn }
+      if clampedX >= layout.clickableFieldEndColumn { clampedX = layout.clickableFieldEndColumn - 1 }
+      let targetIndex: Int
+      if let column = layout.columns.first(where: { $0.columnRange.contains(clampedX) }) {
+        targetIndex = column.index
+      } else {
+        targetIndex = layout.columns.last?.index ?? state.find.field.cursor
+      }
+      if state.isFindFieldWordSelection {
+        if !state.find.field.text.isEmpty {
+          let anchorIndex = state.find.field.selectionAnchor ?? 0
+          let anchorProbe = anchorIndex >= state.find.field.text.count ? max(0, state.find.field.text.count - 1) : anchorIndex
+          let anchorRange = state.find.field.wordRange(at: anchorProbe)
+          let targetProbe = targetIndex >= state.find.field.text.count ? max(0, state.find.field.text.count - 1) : targetIndex
+          let targetRange = state.find.field.wordRange(at: targetProbe)
+          var newLower = anchorRange.lowerBound
+          var newUpper = anchorRange.upperBound
+          var cursorPos = targetIndex
+          if targetRange.upperBound >= anchorRange.upperBound {
+            newUpper = targetRange.upperBound
+            cursorPos = targetRange.upperBound
+          }
+          if targetRange.lowerBound <= anchorRange.lowerBound {
+            newLower = targetRange.lowerBound
+            cursorPos = targetRange.lowerBound
+          }
+          state.find.field.selection = newLower..<newUpper
+          state.find.field.selectionAnchor = anchorRange.lowerBound
+          state.find.field.cursor = cursorPos
+          state.find.field.ensureCursorVisible()
+        }
+      } else {
+        state.find.field.setCursor(targetIndex, expandSelection: true)
+        state.find.field.ensureCursorVisible()
+      }
+      state.find.cursorVisible = true
+      state.find.lastBlinkTime = Date()
+      state.needsRedraw = true
+      return
+    }
     if state.isDragging || state.isScrollbarDragging {
       let contentTop = 2
       let localRow = event.y - contentTop

@@ -183,6 +183,16 @@ func selectAll(state: inout EditorState) {
 }
 
 func copySelection(state: inout EditorState) {
+  if state.focusedControl == .findField {
+    guard let selection = state.find.field.selectedText(), !selection.isEmpty else { return }
+    do {
+      try Clipboard.copy(selection)
+    } catch {
+      fputs("Copy failed: \(error)\n", stderr)
+    }
+    return
+  }
+
   guard state.hasSelection, let selection = selectedText(from: state) else { return }
   do {
     try Clipboard.copy(selection)
@@ -192,6 +202,22 @@ func copySelection(state: inout EditorState) {
 }
 
 func cutSelection(state: inout EditorState) {
+  if state.focusedControl == .findField {
+    guard let removed = state.find.field.deleteSelectionContents(), !removed.isEmpty else { return }
+    do {
+      try Clipboard.copy(removed)
+      state.markFindCursorMoved()
+      state.recomputeFindMatches()
+    } catch {
+      fputs("Cut failed: \(error)\n", stderr)
+      // if copy fails, we should restore the removed text
+      state.find.field.insert(contentsOf: removed)
+      state.markFindCursorMoved()
+      state.recomputeFindMatches()
+    }
+    return
+  }
+
   recordUndoSnapshot(state: &state, operation: .other)
   guard state.hasSelection, let selection = selectedText(from: state) else { return }
   do {
@@ -204,6 +230,14 @@ func cutSelection(state: inout EditorState) {
 
 func pasteClipboard(state: inout EditorState) {
   do {
+    if state.focusedControl == .findField {
+      guard let pasted = try Clipboard.paste() else { return }
+      if pasted.isEmpty { return }
+      state.find.field.insert(contentsOf: pasted)
+      state.markFindCursorMoved()
+      state.recomputeFindMatches()
+      return
+    }
     recordUndoSnapshot(state: &state, operation: .paste)
     guard let pasted = try Clipboard.paste() else { return }
     if pasted.isEmpty { return }
