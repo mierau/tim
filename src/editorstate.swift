@@ -326,7 +326,7 @@ struct EditorState {
   mutating func bufferDidChange(lineRange: Range<Int>? = nil) {
     layoutGeneration &+= 1
     if let range = lineRange {
-      layoutCache.invalidateLines(in: range)
+      layoutCache.invalidateLines(in: range, totalLines: buffer.count)
     } else {
       layoutCache.invalidateAll()
     }

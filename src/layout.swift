@@ -11,53 +11,155 @@ struct VisualRow {
 struct LayoutCache {
   struct Snapshot {
     let rows: [VisualRow]
+    let lineOffsets: [Int]
   }
 
-  private var cachedRows: [VisualRow] = []
+  private var perLineRows: [[VisualRow]] = []
+  private var flattenedRows: [VisualRow] = []
+  private var lineStartOffsets: [Int] = []
+  private var dirtyLines = IndexSet()
   private var cachedWidth: Int = -1
-  private var cachedGeneration: Int = -1
+  private var cachedLineCount: Int = 0
 
   mutating func invalidateAll() {
-    cachedRows.removeAll(keepingCapacity: true)
+    perLineRows.removeAll(keepingCapacity: false)
+    flattenedRows.removeAll(keepingCapacity: false)
+    lineStartOffsets.removeAll(keepingCapacity: false)
+    dirtyLines.removeAll()
     cachedWidth = -1
-    cachedGeneration = -1
+    cachedLineCount = 0
   }
 
-  mutating func invalidateLines(in range: Range<Int>) {
-    if range.isEmpty { return }
-    cachedRows.removeAll(keepingCapacity: true)
-    cachedWidth = -1
-    cachedGeneration = -1
+  mutating func invalidateLines(in range: Range<Int>, totalLines: Int) {
+    guard !range.isEmpty else { return }
+    if cachedWidth == -1 {
+      return
+    }
+
+    if cachedLineCount != totalLines {
+      cachedLineCount = totalLines
+      perLineRows = Array(repeating: [], count: totalLines)
+      lineStartOffsets = Array(repeating: 0, count: totalLines)
+      flattenedRows.removeAll(keepingCapacity: false)
+      dirtyLines = IndexSet(integersIn: 0..<totalLines)
+      return
+    }
+
+    if perLineRows.count != totalLines {
+      perLineRows = Array(repeating: [], count: totalLines)
+    }
+    if lineStartOffsets.count != totalLines {
+      lineStartOffsets = Array(repeating: 0, count: totalLines)
+    }
+
+    let clampedLower = max(0, range.lowerBound)
+    let clampedUpper = min(totalLines, range.upperBound)
+    guard clampedLower < clampedUpper else { return }
+    dirtyLines.insert(integersIn: clampedLower..<clampedUpper)
   }
 
   mutating func snapshot(for state: EditorState, contentWidth: Int) -> Snapshot {
+    let lineCount = state.buffer.count
+
     guard contentWidth > 0 else {
-      cachedRows = []
+      flattenedRows = []
+      perLineRows = Array(repeating: [], count: lineCount)
+      lineStartOffsets = Array(repeating: 0, count: lineCount)
       cachedWidth = contentWidth
-      cachedGeneration = state.layoutGeneration
-      return Snapshot(rows: cachedRows)
+      cachedLineCount = lineCount
+      return Snapshot(rows: flattenedRows, lineOffsets: lineStartOffsets)
     }
 
-    if cachedWidth != contentWidth || cachedGeneration != state.layoutGeneration {
-      cachedRows = computeRows(for: state.buffer, width: contentWidth)
+    if cachedWidth != contentWidth {
       cachedWidth = contentWidth
-      cachedGeneration = state.layoutGeneration
+      cachedLineCount = lineCount
+      rebuildAll(buffer: state.buffer, width: contentWidth)
+    } else if cachedLineCount != lineCount {
+      cachedLineCount = lineCount
+      rebuildAll(buffer: state.buffer, width: contentWidth)
+    } else {
+      ensureStorage(for: lineCount)
+      if flattenedRows.isEmpty && lineCount > 0 {
+        rebuildAll(buffer: state.buffer, width: contentWidth)
+      } else if !dirtyLines.isEmpty {
+        updateDirtyLines(buffer: state.buffer, width: contentWidth)
+        dirtyLines.removeAll()
+      }
     }
 
-    return Snapshot(rows: cachedRows)
+    if flattenedRows.isEmpty {
+      flattenedRows = [VisualRow(lineIndex: 0, start: 0, end: 0, isFirst: true, isEndOfLine: true)]
+      lineStartOffsets = []
+    }
+
+    return Snapshot(rows: flattenedRows, lineOffsets: lineStartOffsets)
   }
 
-  private func computeRows(for buffer: [String], width: Int) -> [VisualRow] {
-    var rows: [VisualRow] = []
-    rows.reserveCapacity(buffer.count)
-    for (lineIndex, line) in buffer.enumerated() {
-      let lineRows = makeRows(for: line, lineIndex: lineIndex, width: width)
-      rows.append(contentsOf: lineRows)
+  private mutating func ensureStorage(for lineCount: Int) {
+    if lineCount == 0 {
+      perLineRows = []
+      lineStartOffsets = []
+      return
     }
-    if rows.isEmpty {
-      rows.append(VisualRow(lineIndex: 0, start: 0, end: 0, isFirst: true, isEndOfLine: true))
+    if perLineRows.count != lineCount {
+      perLineRows = Array(repeating: [], count: lineCount)
     }
-    return rows
+    if lineStartOffsets.count != lineCount {
+      lineStartOffsets = Array(repeating: 0, count: lineCount)
+    }
+  }
+
+  private mutating func rebuildAll(buffer: [String], width: Int) {
+    let lineCount = buffer.count
+    ensureStorage(for: lineCount)
+
+    flattenedRows.removeAll(keepingCapacity: true)
+    lineStartOffsets.removeAll(keepingCapacity: true)
+    lineStartOffsets.reserveCapacity(lineCount)
+
+    var runningIndex = 0
+    for (idx, line) in buffer.enumerated() {
+      lineStartOffsets.append(runningIndex)
+      let rows = makeRows(for: line, lineIndex: idx, width: width)
+      perLineRows[idx] = rows
+      flattenedRows.append(contentsOf: rows)
+      runningIndex += rows.count
+    }
+
+    if lineCount == 0 {
+      perLineRows = []
+      lineStartOffsets = []
+      flattenedRows = []
+    }
+    dirtyLines.removeAll()
+  }
+
+  private mutating func updateDirtyLines(buffer: [String], width: Int) {
+    guard !dirtyLines.isEmpty else { return }
+    ensureStorage(for: buffer.count)
+    let sorted = dirtyLines.sorted()
+
+    for idx in sorted {
+      guard idx >= 0, idx < buffer.count else { continue }
+      let line = buffer[idx]
+      let oldRows = perLineRows[idx]
+      let oldCount = oldRows.count
+      let newRows = makeRows(for: line, lineIndex: idx, width: width)
+      perLineRows[idx] = newRows
+
+      let startIndex = idx < lineStartOffsets.count ? lineStartOffsets[idx] : flattenedRows.count
+      let endIndex = startIndex + oldCount
+      if startIndex <= flattenedRows.count && endIndex <= flattenedRows.count {
+        flattenedRows.replaceSubrange(startIndex..<endIndex, with: newRows)
+      }
+
+      let delta = newRows.count - oldCount
+      if delta != 0 {
+        for offsetIndex in (idx + 1)..<lineStartOffsets.count {
+          lineStartOffsets[offsetIndex] += delta
+        }
+      }
+    }
   }
 }
 
@@ -136,21 +238,38 @@ func wrapLineIndices(_ line: String, width: Int) -> [Int] {
   return indices
 }
 
-func findCursorVisualIndex(state: EditorState, rows: [VisualRow]) -> (index: Int, row: VisualRow) {
-  for (i, r) in rows.enumerated() {
-    if r.lineIndex == state.cursorLine {
-      let upperBoundExclusive = r.end
-      let inRange: Bool
-      if r.isEndOfLine {
-        inRange = state.cursorColumn >= r.start && state.cursorColumn <= upperBoundExclusive
-      } else {
-        inRange = state.cursorColumn >= r.start && state.cursorColumn < upperBoundExclusive
+func findCursorVisualIndex(state: EditorState, snapshot: LayoutCache.Snapshot) -> (index: Int, row: VisualRow) {
+  let rows = snapshot.rows
+  guard !rows.isEmpty else {
+    let fallback = VisualRow(lineIndex: 0, start: 0, end: 0, isFirst: true, isEndOfLine: true)
+    return (0, fallback)
+  }
+
+  let cursorLine = max(0, min(state.cursorLine, state.buffer.count - 1))
+  let offsets = snapshot.lineOffsets
+
+  if cursorLine < offsets.count {
+    let startIndex = offsets[cursorLine]
+    let endIndex = (cursorLine + 1) < offsets.count ? offsets[cursorLine + 1] : rows.count
+    if startIndex < endIndex {
+      for i in startIndex..<endIndex {
+        let r = rows[i]
+        let upperBoundExclusive = r.end
+        let inRange: Bool
+        if r.isEndOfLine {
+          inRange = state.cursorColumn >= r.start && state.cursorColumn <= upperBoundExclusive
+        } else {
+          inRange = state.cursorColumn >= r.start && state.cursorColumn < upperBoundExclusive
+        }
+        if inRange { return (i, r) }
       }
-      if inRange { return (i, r) }
+      return (startIndex, rows[startIndex])
     }
   }
-  for (i, r) in rows.enumerated() where r.lineIndex == state.cursorLine {
-    return (i, r)
+
+  if let matchIndex = rows.enumerated().first(where: { $0.element.lineIndex == cursorLine })?.offset {
+    return (matchIndex, rows[matchIndex])
   }
+
   return (0, rows[0])
 }

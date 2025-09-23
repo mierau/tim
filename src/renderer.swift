@@ -243,7 +243,8 @@ func drawEditor(state: inout EditorState) {
 
   var frame = Array(repeating: String(repeating: " ", count: termWidth), count: termRows)
 
-  var visualRows = state.layoutCache.snapshot(for: state, contentWidth: layoutWidth).rows
+  let layoutSnapshot = state.layoutCache.snapshot(for: state, contentWidth: layoutWidth)
+  var visualRows = layoutSnapshot.rows
   if visualRows.isEmpty {
     let fallbackLine = min(state.cursorLine, max(0, state.buffer.count - 1))
     visualRows = [VisualRow(lineIndex: fallbackLine, start: 0, end: 0, isFirst: true, isEndOfLine: true)]
@@ -257,7 +258,7 @@ func drawEditor(state: inout EditorState) {
 
   var vScroll = state.visualScrollOffset
 
-  let (cursorVIndex, cursorVRow) = findCursorVisualIndex(state: state, rows: visualRows)
+  let (cursorVIndex, cursorVRow) = findCursorVisualIndex(state: state, snapshot: layoutSnapshot)
   if state.pinCursorToView {
     if cursorVIndex < state.visualScrollOffset {
       state.visualScrollOffset = cursorVIndex

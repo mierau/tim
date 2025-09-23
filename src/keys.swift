@@ -517,8 +517,9 @@ func pageScroll(up: Bool, state: inout EditorState, fraction: Double = 1.0) {
   let headerLines = 1
   let footerLines = 2
   let maxVisibleRows = max(1, termSize.rows - headerLines - footerLines)
-  var vrows = state.layoutCache.snapshot(for: state, contentWidth: contentWidth).rows
-  let (curVIndex, curVRow) = findCursorVisualIndex(state: state, rows: vrows)
+  let snapshot = state.layoutCache.snapshot(for: state, contentWidth: contentWidth)
+  let vrows = snapshot.rows
+  let (curVIndex, curVRow) = findCursorVisualIndex(state: state, snapshot: snapshot)
   let colInRow = max(0, state.cursorColumn - curVRow.start)
   let page = maxVisibleRows
   let frac = max(0.0, min(1.0, fraction))
@@ -534,8 +535,8 @@ func pageScroll(up: Bool, state: inout EditorState, fraction: Double = 1.0) {
     newOffset = min(maxOffset, newOffset + delta)
     newCursorV = min(totalRows - 1, curVIndex + delta)
   }
-  vrows = state.layoutCache.snapshot(for: state, contentWidth: contentWidth).rows
-  let newRow = vrows[newCursorV]
+  let clampedCursorV = max(0, min(totalRows - 1, newCursorV))
+  let newRow = vrows[clampedCursorV]
   let newColInRow = min(colInRow, max(0, newRow.end - newRow.start))
   state.cursorLine = newRow.lineIndex
   state.cursorColumn = newRow.start + newColInRow
@@ -594,16 +595,13 @@ func moveCursorByVisualRow(direction: Int, state: inout EditorState) -> Bool {
   state.clampCursor()
   let termSize = Terminal.getTerminalSize()
   let contentWidth = max(1, termSize.cols - 6)
-  var visualRows = state.layoutCache.snapshot(for: state, contentWidth: contentWidth).rows
+  let snapshot = state.layoutCache.snapshot(for: state, contentWidth: contentWidth)
+  let visualRows = snapshot.rows
   if visualRows.isEmpty { return false }
 
-  let (currentIndex, currentRow) = findCursorVisualIndex(state: state, rows: visualRows)
+  let (currentIndex, currentRow) = findCursorVisualIndex(state: state, snapshot: snapshot)
   let targetIndex = currentIndex + direction
-  if targetIndex < 0 { return false }
-  if targetIndex >= visualRows.count {
-    visualRows = state.layoutCache.snapshot(for: state, contentWidth: contentWidth).rows
-    if targetIndex >= visualRows.count { return false }
-  }
+  if targetIndex < 0 || targetIndex >= visualRows.count { return false }
 
   let nextRow = visualRows[targetIndex]
   let colInRow = max(0, state.cursorColumn - currentRow.start)
