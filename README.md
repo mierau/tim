@@ -80,18 +80,26 @@ Additional flags:
 Find within the current buffer with `⌃F`, advance matches with `⌃G`, move backward with `⌃R`, and press `Esc` (or `⌃F` a second time) to close. After opening the prompt, pressing `⌃F` moves focus to the document so subsequent typing edits the buffer; run `⌃F` once more to exit. Surround the query with `/` characters to run a regular expression, e.g. `/^[A-Z].*/`.
 
 ## Project Layout
-- `src/app.swift` bootstraps CLI parsing, file loading, and Wikipedia/HTTP entry points
-- `src/editorcontroller.swift` orchestrates the main render loop and terminal lifetime
-- `src/editorstate.swift` tracks buffer, cursor/selection state, undo stacks, and layout cache metadata
-- `src/actions.swift` applies text mutations, clipboard, and selection helpers
-- `src/layout.swift` wraps logical lines into visual rows (cached per terminal width)
-- `src/renderer.swift` draws the editor frame, gutter, status footer, and cursor
-- `src/input.swift`, `src/keys.swift`, `src/mouse.swift` decode keyboard/mouse events and route them to actions
-- `src/terminal.swift` and `src/scrollbar.swift` emit escape codes and scrollbar math
-- `src/http.swift` implements the synchronous URLSession helpers used across the app
-- `src/wikipedia.swift` and `src/bluesky.swift` fetch rich text sources and normalize them to plain-text buffers
-- `src/rss.swift` parses RSS/Atom feeds into timeline entries
-- `src/clipboard.swift` bridges to `pbcopy`/`pbpaste` for macOS clipboard integration
+- `src/app.swift` wires CLI parsing, document loading, and editor launch
+- `src/cli.swift` defines the command-line interface (`tim`, `-w`, `-r`, `-b`, etc.)
+- `src/editorcontroller.swift` runs the terminal session and render loop
+- `src/editorstate.swift` stores buffer contents, selections, undo stacks, layout cache, and UI flags
+- `src/actions.swift` applies text mutations, clipboard operations, and undo bookkeeping
+- `src/input.swift` reads raw key bytes
+- `src/keys.swift` translates key combos into editor actions
+- `src/mouse.swift` processes mouse wheel clicks/drags and scrollbar interaction
+- `src/layout.swift` converts logical lines into wrapped visual rows
+- `src/renderer.swift` draws the editor frame, gutter, footer, highlights, and cursor
+- `src/scrollbar.swift` computes proportional scrollbar geometry consumed by the renderer
+- `src/terminal.swift` handles escape sequences, raw-mode setup, and alt-screen helpers
+- `src/documentloader.swift` coordinates local files, stdin, HTTP, Wikipedia, RSS, and Bluesky sources
+- `src/http.swift` provides synchronous networking utilities used by the loaders
+- `src/wikipedia.swift` formats article extracts for the editor
+- `src/rss.swift` parses feeds and renders plain-text timelines
+- `src/bluesky.swift` talks to the public Bluesky API and normalizes posts
+- `src/clipboard.swift` bridges to macOS `pbcopy`/`pbpaste`
+- `src/control.swift` houses small reusable UI helper structs
+- `src/textfield.swift` implements the editable field used by the find prompt and similar UI
 
 ## License
 This project is available under the terms of the [MIT License](LICENSE).
