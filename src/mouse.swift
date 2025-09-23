@@ -187,6 +187,7 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
       let targetLine = vr.lineIndex
       let line = state.buffer[targetLine]
       let targetColumn = min(vr.start + editorCol, line.count)
+      state.dragSelectionPreferredColumn = targetColumn
       state.isScrollbarDragging = false
       if event.isPress {
       if state.find.active {
@@ -194,10 +195,6 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
       }
       state.pinCursorToView = false
       let now = Date()
-      let originalSelectionStart = state.selectionStart
-      let originalSelectionEnd = state.selectionEnd
-      let originalCursorLine = state.cursorLine
-      let originalCursorColumn = state.cursorColumn
       if event.hasShift {
         var anchorPoint: (line: Int, column: Int)
         if state.hasSelection, let startSel = state.selectionStart, let endSel = state.selectionEnd {
@@ -218,6 +215,7 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
           state.selectionEnd = selEnd
           state.cursorLine = targetLine
           state.cursorColumn = targetColumn
+          state.dragSelectionPreferredColumn = state.cursorColumn
           state.clampCursor()
           state.showCursor()
           state.isDragging = false
@@ -243,56 +241,55 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
         }
         if clickCount >= 3 {
           let lineLen = line.count
-          state.selectionStart = (targetLine, 0)
-          state.selectionEnd = (targetLine, lineLen)
-          state.cursorLine = targetLine
-          state.cursorColumn = lineLen
-          state.clampCursor()
-          state.isDragging = true
-          state.selectionMode = .line(anchorLine: targetLine)
-        } else if clickCount == 2 {
-          if !line.isEmpty {
+        state.selectionStart = (targetLine, 0)
+        state.selectionEnd = (targetLine, lineLen)
+        state.cursorLine = targetLine
+        state.cursorColumn = lineLen
+        state.dragSelectionPreferredColumn = state.cursorColumn
+        state.clampCursor()
+        state.isDragging = true
+        state.selectionMode = .line(anchorLine: targetLine)
+      } else if clickCount == 2 {
+        if !line.isEmpty {
             let idx = max(0, min(targetColumn, max(0, line.count - 1)))
             let range = wordRange(in: line, at: idx)
-            state.selectionStart = (targetLine, range.start)
-            state.selectionEnd = (targetLine, range.end)
-            state.cursorLine = targetLine
-            state.cursorColumn = range.end
-            state.clampCursor()
-            state.isDragging = true
-            state.selectionMode = .word(
-              anchorLine: targetLine, anchorStart: range.start, anchorEnd: range.end)
-          }
-        } else {
+          state.selectionStart = (targetLine, range.start)
+          state.selectionEnd = (targetLine, range.end)
           state.cursorLine = targetLine
-          state.cursorColumn = targetColumn
+          state.cursorColumn = range.end
+          state.dragSelectionPreferredColumn = state.cursorColumn
           state.clampCursor()
           state.isDragging = true
-          state.selectionMode = .character(
-            anchorLine: state.cursorLine, anchorColumn: state.cursorColumn)
-          state.selectionStart = (state.cursorLine, state.cursorColumn)
-          state.selectionEnd = (state.cursorLine, state.cursorColumn)
-        }
-        state.lastClickTime = now
-        state.lastClickLine = targetLine
-        state.lastClickColumn = targetColumn
-        state.lastClickCount = clickCount
-        state.pinCursorToView = true
-        if !positionsEqual(state.selectionStart, originalSelectionStart)
-          || !positionsEqual(state.selectionEnd, originalSelectionEnd)
-          || state.cursorLine != originalCursorLine
-          || state.cursorColumn != originalCursorColumn
-        {
-          state.needsRedraw = true
+          state.selectionMode = .word(
+            anchorLine: targetLine, anchorStart: range.start, anchorEnd: range.end)
         }
       } else {
-        if state.isDragging {
-          state.isDragging = false
-          if case .character? = selectionModeForClearing(state), let start = state.selectionStart,
-            start.line == targetLine && start.column == targetColumn
-          {
-            state.clearSelection()
-          }
+        state.cursorLine = targetLine
+        state.cursorColumn = targetColumn
+        state.dragSelectionPreferredColumn = state.cursorColumn
+        state.clampCursor()
+        state.isDragging = true
+        state.selectionMode = .character(
+          anchorLine: state.cursorLine, anchorColumn: state.cursorColumn)
+        state.selectionStart = (state.cursorLine, state.cursorColumn)
+        state.selectionEnd = (state.cursorLine, state.cursorColumn)
+      }
+      state.lastClickTime = now
+      state.lastClickLine = targetLine
+      state.lastClickColumn = targetColumn
+      state.lastClickCount = clickCount
+      state.pinCursorToView = true
+      state.needsRedraw = true
+    } else {
+      if state.isDragging {
+        state.isDragging = false
+        state.dragAutoscrollDirection = 0
+        state.dragSelectionPreferredColumn = state.cursorColumn
+        if case .character? = selectionModeForClearing(state), let start = state.selectionStart,
+          start.line == targetLine && start.column == targetColumn
+        {
+          state.clearSelection()
+        }
         }
         if state.isScrollbarDragging { state.isScrollbarDragging = false }
       }
@@ -342,113 +339,71 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
     }
     if state.isDragging || state.isScrollbarDragging {
       let contentTop = 2
-      let localRow = event.y - contentTop
+      var localRow = event.y - contentTop
       let editorCol = max(0, event.x - (leftInset + 1))
-      if localRow >= 0 {
-        if state.isScrollbarDragging {
-          let termSize = Terminal.getTerminalSize()
-          let contentWidth = max(1, termSize.cols - (leftInset + 1))
-          let headerLines = 1
-          let footerLines = 2
-          let maxVisibleRows = max(1, termSize.rows - headerLines - footerLines)
-          let snapshot = state.layoutCache.snapshot(for: state, contentWidth: contentWidth)
-          let totalRows = max(snapshot.rows.count, 1)
-          let trackHeight = maxVisibleRows
-          let maxOffset = max(0, totalRows - trackHeight)
-          var handleHeight = min(trackHeight, totalRows)
-          if totalRows > trackHeight {
-            handleHeight = max(
-              1, Int(Double(trackHeight) * Double(trackHeight) / Double(totalRows)))
-          }
-          let pos = min(max(localRow - handleHeight / 2, 0), max(0, trackHeight - handleHeight))
-          let denom = max(1, trackHeight - handleHeight)
-          let newOffset = Int(round(Double(pos) / Double(denom) * Double(maxOffset)))
-          let desired = min(maxOffset, max(0, newOffset))
-          state.visualScrollOffset = desired
-          state.needsRedraw = true
-          return
+      let termSize = Terminal.getTerminalSize()
+      let contentWidth = max(1, termSize.cols - (leftInset + 1))
+      let headerLines = 1
+      let footerLines = 2
+      let maxVisibleRows = max(1, termSize.rows - headerLines - footerLines)
+      let snapshot = state.layoutCache.snapshot(for: state, contentWidth: contentWidth)
+      let vrows = snapshot.rows
+      guard !vrows.isEmpty else { return }
+
+      if state.isScrollbarDragging && localRow >= 0 {
+        let totalRows = max(vrows.count, 1)
+        let trackHeight = maxVisibleRows
+        let maxOffset = max(0, totalRows - trackHeight)
+        var handleHeight = min(trackHeight, totalRows)
+        if totalRows > trackHeight {
+          handleHeight = max(1, Int(Double(trackHeight * trackHeight) / Double(totalRows)))
         }
-        let termSize = Terminal.getTerminalSize()
-        let contentWidth = max(1, termSize.cols - (leftInset + 1))
-        let snapshot = state.layoutCache.snapshot(for: state, contentWidth: contentWidth)
-        let vrows = snapshot.rows
-        guard !vrows.isEmpty else { return }
-        let vIndex = min(state.visualScrollOffset + localRow, max(0, vrows.count - 1))
-        let vr = vrows[vIndex]
-        let targetLine = vr.lineIndex
-        let line = state.buffer[targetLine]
-        let targetColumn = min(vr.start + editorCol, line.count)
-        let originalSelectionStart = state.selectionStart
-        let originalSelectionEnd = state.selectionEnd
-        let originalCursorLine = state.cursorLine
-        let originalCursorColumn = state.cursorColumn
-        switch state.selectionMode {
-        case .line(let anchorLine):
-          let startLine = min(anchorLine, targetLine)
-          let endLine = max(anchorLine, targetLine)
-          let endLen = state.buffer[endLine].count
-          state.selectionStart = (startLine, 0)
-          state.selectionEnd = (endLine, endLen)
-          if targetLine >= anchorLine {
-            state.cursorLine = endLine
-            state.cursorColumn = endLen
-          } else {
-            state.cursorLine = startLine
-            state.cursorColumn = 0
-          }
-          state.clampCursor()
-        case .word(let anchorLine, let anchorStart, let anchorEnd):
-          let range: (start: Int, end: Int)
-          if line.isEmpty {
-            range = (0, 0)
-          } else {
-            let idx = max(0, min(targetColumn, max(0, line.count - 1)))
-            range = wordRange(in: line, at: idx)
-          }
-          func cmp(_ a: (line: Int, col: Int), _ b: (line: Int, col: Int)) -> Int {
-            if a.line < b.line { return -1 }
-            if a.line > b.line { return 1 }
-            if a.col < b.col { return -1 }
-            if a.col > b.col { return 1 }
-            return 0
-          }
-          let targetPos = (line: targetLine, col: targetColumn)
-          let aStart = (line: anchorLine, col: anchorStart)
-          let aEnd = (line: anchorLine, col: anchorEnd)
-          if cmp(targetPos, aEnd) >= 0 {
-            state.selectionStart = (line: aStart.line, column: aStart.col)
-            state.selectionEnd = (targetLine, range.end)
-            state.cursorLine = targetLine
-            state.cursorColumn = range.end
-          } else if cmp(targetPos, aStart) <= 0 {
-            state.selectionStart = (targetLine, range.start)
-            state.selectionEnd = (line: aEnd.line, column: aEnd.col)
-            state.cursorLine = targetLine
-            state.cursorColumn = range.start
-          } else {
-            state.selectionStart = (line: aStart.line, column: aStart.col)
-            state.selectionEnd = (line: aEnd.line, column: aEnd.col)
-            state.cursorLine = anchorLine
-            state.cursorColumn = anchorEnd
-          }
-          state.clampCursor()
-        case .character:
-          state.selectionEnd = (targetLine, targetColumn)
-          state.cursorLine = targetLine
-          state.cursorColumn = targetColumn
-          state.clampCursor()
-        case .none:
-          break
-        }
-        if !positionsEqual(state.selectionStart, originalSelectionStart)
-          || !positionsEqual(state.selectionEnd, originalSelectionEnd)
-          || state.cursorLine != originalCursorLine
-          || state.cursorColumn != originalCursorColumn
-        {
-          state.needsRedraw = true
-          state.pinCursorToView = true
-        }
+        let pos = min(max(localRow - handleHeight / 2, 0), max(0, trackHeight - handleHeight))
+        let denom = max(1, trackHeight - handleHeight)
+        let newOffset = Int(round(Double(pos) / Double(denom) * Double(maxOffset)))
+        let desired = min(maxOffset, max(0, newOffset))
+        state.visualScrollOffset = desired
+        state.needsRedraw = true
+        return
       }
+
+      let totalRows = max(vrows.count, 1)
+      let maxOffset = max(0, totalRows - maxVisibleRows)
+      var scrolled = false
+
+      if localRow < 0 {
+        if state.visualScrollOffset > 0 {
+          state.visualScrollOffset -= 1
+          scrolled = true
+        }
+        localRow = 0
+        state.dragAutoscrollDirection = -1
+      } else if localRow >= maxVisibleRows {
+        if state.visualScrollOffset < maxOffset {
+          state.visualScrollOffset += 1
+          scrolled = true
+        }
+        localRow = maxVisibleRows - 1
+        state.dragAutoscrollDirection = 1
+      } else {
+        state.dragAutoscrollDirection = 0
+      }
+
+      localRow = max(0, min(localRow, maxVisibleRows - 1))
+      let vIndex = max(0, min(state.visualScrollOffset + localRow, vrows.count - 1))
+      let vr = vrows[vIndex]
+      let targetLine = vr.lineIndex
+      let line = state.buffer[targetLine]
+      let targetColumn = min(vr.start + editorCol, line.count)
+
+      if scrolled {
+        state.needsRedraw = true
+        state.pinCursorToView = true
+      } else if state.dragAutoscrollDirection != 0 {
+        state.dragAutoscrollDirection = 0
+      }
+
+      state.updateSelectionDuringDrag(targetLine: targetLine, targetColumn: targetColumn)
     }
   }
 }
@@ -459,19 +414,5 @@ private func selectionModeForClearing(_ state: EditorState) -> SelectionMode? {
     return state.selectionMode
   default:
     return nil
-  }
-}
-
-private func positionsEqual(
-  _ lhs: (line: Int, column: Int)?,
-  _ rhs: (line: Int, column: Int)?
-) -> Bool {
-  switch (lhs, rhs) {
-  case (nil, nil):
-    return true
-  case let (l?, r?):
-    return l.line == r.line && l.column == r.column
-  default:
-    return false
   }
 }

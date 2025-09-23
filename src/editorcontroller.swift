@@ -57,6 +57,11 @@ enum EditorController {
         drawEditor(state: &editorState)
         editorState.needsRedraw = false
       }
+
+      if editorState.isDragging && editorState.dragAutoscrollDirection != 0 {
+        editorState.needsRedraw = true
+      }
+
       while true {
         let key = readKeyWithTimeout()
         if key == -1 { break }

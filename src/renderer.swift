@@ -61,7 +61,7 @@ private func buildFindStatus(
   state.find.field.viewOffset = viewOffset
 
   let selection = state.find.field.selection
-  var statusText = prefix
+  var statusText = Terminal.grey + prefix + Terminal.white
   var columns: [EditorState.FindState.FindFieldLayout.Column] = []
   var columnPosition = prefixWidth
 
@@ -70,8 +70,7 @@ private func buildFindStatus(
     let width = widths[idx]
     let charString = String(character)
     if selection?.contains(idx) ?? false {
-      statusText += Terminal.reset + Terminal.highlight + charString + Terminal.reset
-      if !baseColor.isEmpty { statusText += baseColor }
+      statusText += Terminal.highlight + charString + Terminal.reset + Terminal.white
     } else {
       statusText += charString
     }
@@ -79,6 +78,8 @@ private func buildFindStatus(
     columns.append(.init(index: idx, columnRange: absoluteRange))
     columnPosition += width
   }
+
+  statusText += Terminal.reset
 
   let caretOffset = prefixWidth + widthBetween(viewOffset, cursor)
   let statusWidth = prefixWidth + usedWidth
@@ -243,13 +244,43 @@ func drawEditor(state: inout EditorState) {
 
   var frame = Array(repeating: String(repeating: " ", count: termWidth), count: termRows)
 
-  let layoutSnapshot = state.layoutCache.snapshot(for: state, contentWidth: layoutWidth)
+  var layoutSnapshot = state.layoutCache.snapshot(for: state, contentWidth: layoutWidth)
   var visualRows = layoutSnapshot.rows
   if visualRows.isEmpty {
     let fallbackLine = min(state.cursorLine, max(0, state.buffer.count - 1))
     visualRows = [VisualRow(lineIndex: fallbackLine, start: 0, end: 0, isFirst: true, isEndOfLine: true)]
   }
   let totalRows = max(visualRows.count, 1)
+
+  if state.isDragging && state.dragAutoscrollDirection != 0 {
+    let direction = state.dragAutoscrollDirection
+    let headerLines = 1
+    let footerLines = 2
+    let maxVisibleRows = max(1, termRows - headerLines - footerLines)
+    var newOffset = state.visualScrollOffset + direction
+    let maxOffset = max(0, totalRows - maxVisibleRows)
+    newOffset = max(0, min(maxOffset, newOffset))
+    if newOffset != state.visualScrollOffset {
+      state.visualScrollOffset = newOffset
+      state.pinCursorToView = true
+      layoutSnapshot = state.layoutCache.snapshot(for: state, contentWidth: layoutWidth)
+      visualRows = layoutSnapshot.rows
+    }
+
+    if !visualRows.isEmpty {
+      let visibleTop = state.visualScrollOffset
+      let visibleBottom = min(totalRows - 1, visibleTop + max(0, maxVisibleRows - 1))
+      let targetIndex = direction < 0 ? visibleTop : visibleBottom
+      let clampedIndex = max(0, min(targetIndex, visualRows.count - 1))
+      let row = visualRows[clampedIndex]
+      let line = state.buffer[row.lineIndex]
+      let preferredColumn = max(0, state.dragSelectionPreferredColumn)
+      let targetColumn = min(preferredColumn, line.count)
+      state.updateSelectionDuringDrag(targetLine: row.lineIndex, targetColumn: targetColumn)
+    }
+  } else if !state.isDragging {
+    state.dragAutoscrollDirection = 0
+  }
 
   var maxOffsetActual = max(0, totalRows - maxVisibleRows)
   if state.visualScrollOffset > maxOffsetActual {
@@ -381,37 +412,107 @@ func drawEditor(state: inout EditorState) {
   var pendingFindLayout: EditorState.FindState.FindFieldLayout? = nil
 
   if state.find.active {
-    var info = ""
-    if let error = state.find.regexError {
-      info = "regex error: \(error)"
-    } else if !state.find.field.text.isEmpty {
+    statusText = ""
+    statusDisplayWidth = 0
+    statusColor = Terminal.grey
+    struct HintSegment {
+      let plain: String
+      let rendered: String
+      let width: Int
+    }
+
+    func makeSegment(plain: String, rendered: String) -> HintSegment {
+      HintSegment(plain: plain, rendered: rendered, width: Terminal.displayWidth(of: plain))
+    }
+
+    func totalWidth(of segments: [HintSegment], separatorWidth: Int) -> Int {
+      guard !segments.isEmpty else { return 0 }
+      let sum = segments.reduce(0) { $0 + $1.width }
+      return sum + separatorWidth * (segments.count - 1)
+    }
+
+    func joinSegments(_ segments: [HintSegment], separator: String) -> String {
+      guard !segments.isEmpty else { return "" }
+      return segments.map { $0.rendered }.joined(separator: separator)
+    }
+
+    let infoText: String = {
+      if let error = state.find.regexError {
+        return "regex error: \(error)"
+      }
+      guard !state.find.field.text.isEmpty else { return "" }
       let total = state.find.matches.count
-      if total == 0 {
-        info = "0/0"
-      } else {
-        info = "\(state.find.currentIndex + 1)/\(total)"
+      if total == 0 { return "0/0" }
+      return "\(state.find.currentIndex + 1)/\(total)"
+    }()
+
+    let infoSegment: HintSegment? = infoText.isEmpty
+      ? nil
+      : makeSegment(plain: infoText, rendered: Terminal.brightBlack + infoText + Terminal.reset)
+
+    let shortcutSegments: [HintSegment] = [
+      makeSegment(
+        plain: "⌃G next",
+        rendered: "\(Terminal.ansiCyan6)⌃G\(Terminal.reset) \(Terminal.brightBlack)next\(Terminal.reset)"),
+      makeSegment(
+        plain: "⌃R prev",
+        rendered: "\(Terminal.ansiCyan6)⌃R\(Terminal.reset) \(Terminal.brightBlack)prev\(Terminal.reset)"),
+      makeSegment(
+        plain: "Esc done",
+        rendered: "\(Terminal.ansiCyan6)Esc\(Terminal.reset) \(Terminal.brightBlack)done\(Terminal.reset)")
+    ]
+
+    let separator = "  "
+    let separatorWidth = Terminal.displayWidth(of: separator)
+    let availableWidth = max(0, termWidth - 2)
+    let prefixWidth = Terminal.displayWidth(of: "Find: ")
+    let baseColor = state.find.regexError == nil ? Terminal.grey : Terminal.red
+
+    var chosenSegments: [HintSegment] = []
+    var findRender: FindFieldRenderResult?
+
+    let hintPriorities: [[HintSegment]] = stride(from: shortcutSegments.count, through: 0, by: -1)
+      .map { Array(shortcutSegments.prefix($0)) }
+
+    outer: for includeInfo in [true, false] {
+      guard includeInfo ? (infoSegment != nil) : true else { continue }
+      for hints in hintPriorities {
+        var segments: [HintSegment] = []
+        if includeInfo, let info = infoSegment { segments.append(info) }
+        segments.append(contentsOf: hints)
+        let hintsWidth = totalWidth(of: segments, separatorWidth: separatorWidth)
+        let statusMaxWidth = max(1, min(availableWidth - hintsWidth, availableWidth))
+        if statusMaxWidth <= prefixWidth {
+          continue
+        }
+        let render = buildFindStatus(
+          state: &state, maxWidth: statusMaxWidth, statusColumnBase: 2, baseColor: baseColor)
+        let statusWidth = render.statusWidth
+        if statusWidth + hintsWidth <= availableWidth {
+          chosenSegments = segments
+          findRender = render
+          break outer
+        }
       }
     }
-    let plain = info.isEmpty
-      ? "⌃G next  ⌃R prev  Esc close"
-      : "⌃G next  ⌃R prev  Esc close  \(info)"
-    controlHints =
-      "\(Terminal.ansiCyan6)⌃G\(Terminal.reset) \(Terminal.brightBlack)next\(Terminal.reset)  "
-      + "\(Terminal.ansiCyan6)⌃R\(Terminal.reset) \(Terminal.brightBlack)prev\(Terminal.reset)  "
-      + "\(Terminal.ansiCyan6)Esc\(Terminal.reset) \(Terminal.brightBlack)close\(Terminal.reset)"
-      + (info.isEmpty ? "" : "  \(Terminal.brightBlack)\(info)\(Terminal.reset)")
-    controlHintsLength = Terminal.displayWidth(of: plain)
 
-    let maxStatusWidth = max(1, termWidth - 2 - controlHintsLength)
-    let baseColor = state.find.regexError == nil ? Terminal.grey : Terminal.red
-    let findRender = buildFindStatus(
-      state: &state, maxWidth: maxStatusWidth, statusColumnBase: 2, baseColor: baseColor)
-    statusText = findRender.statusText
-    statusDisplayWidth = findRender.statusWidth
-    statusColor = baseColor
-    pendingFindLayout = findRender.layout
+    if findRender == nil {
+      let render = buildFindStatus(
+        state: &state, maxWidth: max(1, availableWidth - 2), statusColumnBase: 2, baseColor: baseColor)
+      findRender = render
+    }
+
+    if let render = findRender {
+      statusText = render.statusText
+      statusDisplayWidth = render.statusWidth
+      statusColor = baseColor
+      pendingFindLayout = render.layout
+    }
+
+    controlHintsLength = totalWidth(of: chosenSegments, separatorWidth: separatorWidth)
+    controlHints = joinSegments(chosenSegments, separator: separator)
   } else {
-    let hints = makeControlHints()
+    let hints = makeControlHints(state: state)
     controlHints = hints.0
     controlHintsLength = hints.1
     let status = makeStatusLine(state: state)
@@ -560,16 +661,41 @@ private func lineIsSelected(lineIndex: Int, state: EditorState) -> Bool {
 }
 
 /// Builds the footer control-hint string and reports its display width.
-private func makeControlHints() -> (String, Int) {
-  let shortcuts: [(String, String)] = [
-    ("⌃Q", "quit"),
-    ("⌃S", "save"),
-    ("⌃L", "lines"),
-    ("⌃Z", "undo"),
-    ("⌃Y", "redo"),
-    ("⌃C", "copy"),
-    ("⌃V", "paste")
+private func makeControlHints(state: EditorState) -> (String, Int) {
+  let hasDocumentSelection = state.hasSelection
+  let hasFindSelection: Bool = {
+    guard state.focusedControl == .findField, let selection = state.find.field.selection else { return false }
+    return !selection.isEmpty
+  }()
+
+  var shortcuts: [(String, String)] = [
+    ("⌃Q", "quit")
   ]
+
+  if !hasDocumentSelection {
+    shortcuts.append(("⌃S", "save"))
+  }
+
+  if !hasDocumentSelection {
+    shortcuts.append(("⌃F", "find"))
+  }
+
+  if !state.redoStack.isEmpty {
+    shortcuts.append(("⌃Y", "redo"))
+  } else if !state.undoStack.isEmpty {
+    shortcuts.append(("⌃Z", "undo"))
+  }
+
+  if hasDocumentSelection {
+    shortcuts.append(("⌃X", "cut"))
+  }
+
+  if hasDocumentSelection || hasFindSelection {
+    shortcuts.append(("⌃C", "copy"))
+  }
+
+  shortcuts.append(("⌃V", "paste"))
+
   let parts = shortcuts.map { hint -> (String, Int) in
     let textLength = Terminal.displayWidth(of: hint.0) + 1 + Terminal.displayWidth(of: hint.1)
     let rendered = "\(Terminal.ansiCyan6)\(hint.0)\(Terminal.reset) "

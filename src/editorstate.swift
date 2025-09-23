@@ -134,6 +134,8 @@ struct EditorState {
   var find: FindState
   var focusedControl: FocusTarget
   var showLineNumbers: Bool
+  var dragAutoscrollDirection: Int
+  var dragSelectionPreferredColumn: Int
 
   var displayFilename: String {
     if let filePath { return URL(fileURLWithPath: filePath).lastPathComponent }
@@ -175,6 +177,8 @@ struct EditorState {
     self.find.focus = .document
     self.focusedControl = .document
     self.showLineNumbers = false
+    self.dragAutoscrollDirection = 0
+    self.dragSelectionPreferredColumn = 0
   }
 
   mutating func setFocus(_ target: FocusTarget) {
@@ -339,6 +343,95 @@ struct EditorState {
 }
 
 extension EditorState {
+  mutating func updateSelectionDuringDrag(targetLine: Int, targetColumn: Int) {
+    let originalSelectionStart = selectionStart
+    let originalSelectionEnd = selectionEnd
+    let originalCursorLine = cursorLine
+    let originalCursorColumn = cursorColumn
+
+    switch selectionMode {
+    case .line(let anchorLine):
+      let startLine = max(0, min(anchorLine, targetLine))
+      let clampedEndLine = min(max(anchorLine, targetLine), max(0, buffer.count - 1))
+      let endLen = buffer[clampedEndLine].count
+      selectionStart = (startLine, 0)
+      selectionEnd = (clampedEndLine, endLen)
+      if targetLine >= anchorLine {
+        cursorLine = clampedEndLine
+        cursorColumn = endLen
+      } else {
+        cursorLine = startLine
+        cursorColumn = 0
+      }
+      clampCursor()
+    case .word(let anchorLine, let anchorStart, let anchorEnd):
+      let line = buffer[targetLine]
+      let range: (start: Int, end: Int)
+      if line.isEmpty {
+        range = (0, 0)
+      } else {
+        let idx = max(0, min(targetColumn, max(0, line.count - 1)))
+        range = wordRange(in: line, at: idx)
+      }
+      func cmp(_ a: (line: Int, col: Int), _ b: (line: Int, col: Int)) -> Int {
+        if a.line < b.line { return -1 }
+        if a.line > b.line { return 1 }
+        if a.col < b.col { return -1 }
+        if a.col > b.col { return 1 }
+        return 0
+      }
+      let targetPos = (line: targetLine, col: targetColumn)
+      let aStart = (line: anchorLine, col: anchorStart)
+      let aEnd = (line: anchorLine, col: anchorEnd)
+      if cmp(targetPos, aEnd) >= 0 {
+        selectionStart = (line: aStart.line, column: aStart.col)
+        selectionEnd = (targetLine, range.end)
+        cursorLine = targetLine
+        cursorColumn = range.end
+      } else if cmp(targetPos, aStart) <= 0 {
+        selectionStart = (targetLine, range.start)
+        selectionEnd = (line: aEnd.line, column: aEnd.col)
+        cursorLine = targetLine
+        cursorColumn = range.start
+      } else {
+        selectionStart = (line: aStart.line, column: aStart.col)
+        selectionEnd = (line: aEnd.line, column: aEnd.col)
+        cursorLine = anchorLine
+        cursorColumn = anchorEnd
+      }
+      clampCursor()
+    case .character:
+      selectionEnd = (targetLine, targetColumn)
+      cursorLine = targetLine
+      cursorColumn = targetColumn
+      clampCursor()
+    case .none:
+      break
+    }
+
+    dragSelectionPreferredColumn = targetColumn
+
+    func equalPositions(
+      _ lhs: (line: Int, column: Int)?,
+      _ rhs: (line: Int, column: Int)?
+    ) -> Bool {
+      switch (lhs, rhs) {
+      case (nil, nil): return true
+      case let (l?, r?): return l.line == r.line && l.column == r.column
+      default: return false
+      }
+    }
+
+    if !equalPositions(originalSelectionStart, selectionStart)
+      || !equalPositions(originalSelectionEnd, selectionEnd)
+      || cursorLine != originalCursorLine
+      || cursorColumn != originalCursorColumn
+    {
+      needsRedraw = true
+      pinCursorToView = true
+    }
+  }
+
   mutating func enterFindMode() {
     guard !find.active else { return }
     find.active = true
