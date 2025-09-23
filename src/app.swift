@@ -55,6 +55,8 @@ struct Tim {
       performLoad { try DocumentLoader.fromWikipedia(title: title) }
     case .rss(let url):
       performLoad { try DocumentLoader.fromRSS(url: url) }
+    case .bluesky(let handle):
+      performLoad { try DocumentLoader.fromBluesky(handle: handle) }
     }
   }
 }

@@ -201,6 +201,91 @@ enum DocumentLoader {
     }
   }
 
+  /// Renders the public feed for a Bluesky handle into a text buffer.
+  /// - Parameter handle: The handle, DID, or profile URL supplied by the user.
+  /// - Returns: `DocumentLoadResult` containing the author's posts and a save suggestion.
+  /// - Throws: `DocumentLoaderError` wrapping any Bluesky-specific failures.
+  static func fromBluesky(handle: String) throws -> DocumentLoadResult {
+    do {
+      let feed = try BlueskyAPI.fetchFeed(rawHandle: handle)
+      var lines: [String] = []
+
+      if let display = feed.displayName, !display.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        lines.append(sanitizeContent(display))
+      }
+      lines.append("@\(feed.handle)")
+      lines.append(contentsOf: Array(repeating: "", count: 4))
+
+      var isFirstPost = true
+      for post in feed.posts {
+        if isFirstPost {
+          isFirstPost = false
+        } else {
+          lines.append(contentsOf: Array(repeating: "", count: 4))
+        }
+
+        let authorDisplay = post.authorDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !authorDisplay.isEmpty {
+          lines.append("\(sanitizeContent(authorDisplay)) (@\(post.authorHandle))")
+        } else {
+          lines.append("@\(post.authorHandle)")
+        }
+
+        if let created = post.createdAt {
+          lines.append(formatDateWithOrdinal(created))
+        }
+
+        switch post.context {
+        case .original:
+          break
+        case .repost(let byDisplayName, let handle):
+          var descriptor = "Reposted by "
+          if let byDisplay = byDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines), !byDisplay.isEmpty {
+            descriptor += sanitizeContent(byDisplay)
+            if let handle, !handle.isEmpty {
+              descriptor += " (@\(handle))"
+            }
+          } else if let handle, !handle.isEmpty {
+            descriptor += "@\(handle)"
+          } else {
+            descriptor += "@\(feed.handle)"
+          }
+          lines.append(descriptor)
+        }
+
+        let sanitizedBody = sanitizeContent(post.text)
+        let paragraphs = sanitizedBody
+          .split(whereSeparator: { $0 == "\n" })
+          .map(String.init)
+          .map { $0.trimmingCharacters(in: .whitespaces) }
+          .filter { !$0.isEmpty }
+
+        if !paragraphs.isEmpty {
+          lines.append("")
+          for (index, paragraph) in paragraphs.enumerated() {
+            if index > 0 { lines.append("") }
+            lines.append(paragraph)
+          }
+        }
+
+      }
+
+      let rendered = lines.joined(separator: "\n")
+      let buffer = makeBuffer(from: rendered)
+      let cursor = initialCursor(for: nil, buffer: buffer)
+      let suggested = blueskySuggestedFilename(handle: feed.handle)
+      let cwd = FileManager.default.currentDirectoryPath
+      let savePath = (cwd as NSString).appendingPathComponent(suggested)
+      return DocumentLoadResult(buffer: buffer, filePath: savePath, initialCursor: cursor)
+    } catch let error as BlueskyError {
+      throw DocumentLoaderError.userFacing(error.localizedDescription)
+    } catch let error as DocumentLoaderError {
+      throw error
+    } catch {
+      throw DocumentLoaderError.userFacing("Failed to load Bluesky feed: \(error.localizedDescription)")
+    }
+  }
+
   // MARK: - Helpers
 
   /// Converts raw bytes into sanitized UTF-8 text.
@@ -335,6 +420,23 @@ enum DocumentLoader {
     while slug.contains("__") { slug = slug.replacingOccurrences(of: "__", with: "_") }
     slug = slug.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
     if slug.isEmpty { slug = "feed" }
+    return slug + ".txt"
+  }
+
+  private static func blueskySuggestedFilename(handle: String) -> String {
+    let lowered = handle.lowercased()
+    var slug = ""
+    slug.reserveCapacity(lowered.count)
+    for scalar in lowered.unicodeScalars {
+      if CharacterSet.alphanumerics.contains(scalar) {
+        slug.append(Character(scalar))
+      } else if scalar == "." || scalar == "-" || scalar == "_" {
+        slug.append("_")
+      }
+    }
+    while slug.contains("__") { slug = slug.replacingOccurrences(of: "__", with: "_") }
+    slug = slug.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+    if slug.isEmpty { slug = "bluesky" }
     return slug + ".txt"
   }
 

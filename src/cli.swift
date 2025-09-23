@@ -14,6 +14,7 @@ struct CLI {
     case remote(URL, line: Int?)
     case wikipedia(String)
     case rss(URL)
+    case bluesky(String)
   }
 
   enum ParserError: Error {
@@ -33,6 +34,7 @@ struct CLI {
     var remoteURL: URL?
     var readFromStdin = false
     var rssURL: URL?
+    var blueskyHandle: String?
     var acceptFlags = true
     var wikipediaTokens: [String] = []
 
@@ -64,6 +66,17 @@ struct CLI {
         guard rssURL != nil else {
           throw ParserError.missingArgument("Invalid RSS URL provided")
         }
+        index += 1
+        acceptFlags = false
+        continue
+      }
+
+      if acceptFlags && (arg == "-b" || arg == "--bluesky") {
+        index += 1
+        guard index < arguments.count else {
+          throw ParserError.missingArgument("Expected a handle after \(arg)")
+        }
+        blueskyHandle = arguments[index]
         index += 1
         acceptFlags = false
         continue
@@ -123,8 +136,8 @@ struct CLI {
     }
 
     if readFromStdin {
-      if filePath != nil || rssURL != nil {
-        throw ParserError.invalidCombination("Cannot combine '-' with a file path")
+      if filePath != nil || rssURL != nil || blueskyHandle != nil {
+        throw ParserError.invalidCombination("Cannot combine '-' with other input sources")
       }
       return .open(.standardInput(line: lineNumber))
     }
@@ -134,6 +147,13 @@ struct CLI {
         throw ParserError.invalidCombination("Cannot combine -r with other input sources")
       }
       return .open(.rss(rss))
+    }
+
+    if let handle = blueskyHandle {
+      if filePath != nil || remoteURL != nil || rssURL != nil {
+        throw ParserError.invalidCombination("Cannot combine -b with other input sources")
+      }
+      return .open(.bluesky(handle))
     }
 
     if let url = remoteURL {
@@ -156,6 +176,7 @@ struct CLI {
       tim <http(s) url>         Download URL into a new buffer (UTF-8 text only)
       tim -w <name>             Open the Wikipedia article matching <name>
       tim -r <url>              Fetch and present the RSS/Atom feed at <url>
+      tim -b <handle>           Render the public Bluesky feed for <handle>
       tim <file>:+<line>        Open <file> and jump to <line> (1-based)
       tim +<line> <file>        Jump to <line> after loading <file>
       tim -- <file>             Treat following argument as a literal path
@@ -192,12 +213,9 @@ struct CLI {
   }
 
   private static func parseURLFromString(_ argument: String) -> URL? {
-    if let url = URL(string: argument), let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" {
-      return url
+    guard let url = URL(string: argument), let scheme = url.scheme?.lowercased() else {
+      return nil
     }
-    if let url = URL(string: "https://" + argument), let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" {
-      return url
-    }
-    return nil
+    return (scheme == "http" || scheme == "https") ? url : nil
   }
 }
