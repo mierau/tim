@@ -19,9 +19,12 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
         newOffset = min(maxOffset, newOffset + delta)
       }
       let maxOffset = max(0, totalRows - maxVisibleRows)
-      state.visualScrollOffset = min(max(0, newOffset), maxOffset)
-      state.pinCursorToView = false
-      state.needsRedraw = true
+      let clamped = min(max(0, newOffset), maxOffset)
+      if clamped != state.visualScrollOffset {
+        state.visualScrollOffset = clamped
+        state.pinCursorToView = false
+        state.needsRedraw = true
+      }
     }
     return
   }
@@ -140,28 +143,36 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
         switch Scrollbar.hitTest(localRow: localRow, start: handleStart, height: handleHeight) {
         case .above:
           let step = Scrollbar.pageStep(trackHeight: trackHeight, fraction: 0.9)
-          state.visualScrollOffset = max(0, state.visualScrollOffset - step)
-          state.pinCursorToView = false
-          state.needsRedraw = true
+          let updated = max(0, state.visualScrollOffset - step)
+          if updated != state.visualScrollOffset {
+            state.visualScrollOffset = updated
+            state.pinCursorToView = false
+            state.needsRedraw = true
+          }
           return
         case .below:
           let step = Scrollbar.pageStep(trackHeight: trackHeight, fraction: 0.9)
           let desired = min(maxOffset, state.visualScrollOffset + step)
-          state.visualScrollOffset = max(0, min(desired, maxOffset))
-          state.pinCursorToView = false
-          state.needsRedraw = true
+          let updated = max(0, min(desired, maxOffset))
+          if updated != state.visualScrollOffset {
+            state.visualScrollOffset = updated
+            state.pinCursorToView = false
+            state.needsRedraw = true
+          }
           return
         case .handle:
           let pos = min(max(localRow - handleHeight / 2, 0), max(0, trackHeight - handleHeight))
           let newOffset = Int(
             round(Double(pos) / Double(max(1, trackHeight - handleHeight)) * Double(maxOffset)))
           let desired = min(maxOffset, max(0, newOffset))
-          state.visualScrollOffset = desired
+          if desired != state.visualScrollOffset {
+            state.visualScrollOffset = desired
+            state.pinCursorToView = false
+            state.needsRedraw = true
+          }
           state.isScrollbarDragging = true
           state.isDragging = false
           state.selectionMode = .none
-          state.pinCursorToView = false
-          state.needsRedraw = true
           return
         }
       }
@@ -176,16 +187,20 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
       let targetColumn = min(vr.start + editorCol, line.count)
       state.isScrollbarDragging = false
       if event.isPress {
-        if state.find.active {
-          state.setFocus(.document)
-        }
-        state.pinCursorToView = false
-        let now = Date()
-        if event.hasShift {
-          var anchorPoint: (line: Int, column: Int)
-          if state.hasSelection, let startSel = state.selectionStart, let endSel = state.selectionEnd {
-            let (start, end) = state.normalizeSelection(start: startSel, end: endSel)
-            if state.cursorLine == start.line && state.cursorColumn == start.column {
+      if state.find.active {
+        state.setFocus(.document)
+      }
+      state.pinCursorToView = false
+      let now = Date()
+      let originalSelectionStart = state.selectionStart
+      let originalSelectionEnd = state.selectionEnd
+      let originalCursorLine = state.cursorLine
+      let originalCursorColumn = state.cursorColumn
+      if event.hasShift {
+        var anchorPoint: (line: Int, column: Int)
+        if state.hasSelection, let startSel = state.selectionStart, let endSel = state.selectionEnd {
+          let (start, end) = state.normalizeSelection(start: startSel, end: endSel)
+          if state.cursorLine == start.line && state.cursorColumn == start.column {
               anchorPoint = end
             } else {
               anchorPoint = start
@@ -261,6 +276,13 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
         state.lastClickColumn = targetColumn
         state.lastClickCount = clickCount
         state.pinCursorToView = true
+        if !positionsEqual(state.selectionStart, originalSelectionStart)
+          || !positionsEqual(state.selectionEnd, originalSelectionEnd)
+          || state.cursorLine != originalCursorLine
+          || state.cursorColumn != originalCursorColumn
+        {
+          state.needsRedraw = true
+        }
       } else {
         if state.isDragging {
           state.isDragging = false
@@ -354,6 +376,10 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
         let targetLine = vr.lineIndex
         let line = state.buffer[targetLine]
         let targetColumn = min(vr.start + editorCol, line.count)
+        let originalSelectionStart = state.selectionStart
+        let originalSelectionEnd = state.selectionEnd
+        let originalCursorLine = state.cursorLine
+        let originalCursorColumn = state.cursorColumn
         switch state.selectionMode {
         case .line(let anchorLine):
           let startLine = min(anchorLine, targetLine)
@@ -412,6 +438,14 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
         case .none:
           break
         }
+        if !positionsEqual(state.selectionStart, originalSelectionStart)
+          || !positionsEqual(state.selectionEnd, originalSelectionEnd)
+          || state.cursorLine != originalCursorLine
+          || state.cursorColumn != originalCursorColumn
+        {
+          state.needsRedraw = true
+          state.pinCursorToView = true
+        }
       }
     }
   }
@@ -423,5 +457,19 @@ private func selectionModeForClearing(_ state: EditorState) -> SelectionMode? {
     return state.selectionMode
   default:
     return nil
+  }
+}
+
+private func positionsEqual(
+  _ lhs: (line: Int, column: Int)?,
+  _ rhs: (line: Int, column: Int)?
+) -> Bool {
+  switch (lhs, rhs) {
+  case (nil, nil):
+    return true
+  case let (l?, r?):
+    return l.line == r.line && l.column == r.column
+  default:
+    return false
   }
 }

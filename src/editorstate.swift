@@ -269,10 +269,14 @@ struct EditorState {
     selectionStart = (cursorLine, cursorColumn)
     selectionEnd = (cursorLine, cursorColumn)
     selectionMode = .character(anchorLine: cursorLine, anchorColumn: cursorColumn)
+    needsRedraw = true
   }
 
   mutating func updateSelection() {
-    if selectionStart != nil { selectionEnd = (cursorLine, cursorColumn) }
+    if selectionStart != nil {
+      selectionEnd = (cursorLine, cursorColumn)
+      needsRedraw = true
+    }
   }
 
   func isPositionSelected(line: Int, column: Int) -> Bool {
@@ -320,6 +324,7 @@ struct EditorState {
     if find.active, !find.field.text.isEmpty {
       recomputeFindMatches()
     }
+    needsRedraw = true
   }
 }
 

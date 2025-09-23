@@ -180,6 +180,7 @@ func selectAll(state: inout EditorState) {
   let lastLine = state.buffer.count - 1
   let lastColumn = state.buffer[lastLine].count
   state.selectionEnd = (lastLine, lastColumn)
+  state.needsRedraw = true
 }
 
 func copySelection(state: inout EditorState) {

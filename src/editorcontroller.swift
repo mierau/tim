@@ -60,7 +60,6 @@ enum EditorController {
       while true {
         let key = readKeyWithTimeout()
         if key == -1 { break }
-      editorState.needsRedraw = true
       if editorState.find.active, handleFindKey(key: key, state: &editorState) {
         continue
       }
