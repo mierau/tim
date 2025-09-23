@@ -133,6 +133,7 @@ struct EditorState {
   var layoutGeneration: Int
   var find: FindState
   var focusedControl: FocusTarget
+  var showLineNumbers: Bool
 
   var displayFilename: String {
     if let filePath { return URL(fileURLWithPath: filePath).lastPathComponent }
@@ -173,6 +174,7 @@ struct EditorState {
     self.find = FindState()
     self.find.focus = .document
     self.focusedControl = .document
+    self.showLineNumbers = false
   }
 
   mutating func setFocus(_ target: FocusTarget) {
@@ -312,6 +314,13 @@ struct EditorState {
   mutating func markLayoutDirty() {
     layoutGeneration &+= 1
     layoutCache.invalidateAll()
+  }
+
+  mutating func toggleLineNumbers() {
+    showLineNumbers.toggle()
+    markLayoutDirty()
+    pinCursorToView = true
+    needsRedraw = true
   }
 
   mutating func bufferDidChange(lineRange: Range<Int>? = nil) {

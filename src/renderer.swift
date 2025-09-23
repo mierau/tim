@@ -237,7 +237,8 @@ func drawEditor(state: inout EditorState) {
   let headerLines = 1
   let footerLines = 2
   let maxVisibleRows = max(0, termRows - headerLines - footerLines)
-  let contentWidth = max(1, termWidth - 6)
+  let gutterWidth = state.showLineNumbers ? 5 : 1
+  let contentWidth = max(1, termWidth - (gutterWidth + 1))
   let layoutWidth = contentWidth
 
   var frame = Array(repeating: String(repeating: " ", count: termWidth), count: termRows)
@@ -314,15 +315,19 @@ func drawEditor(state: inout EditorState) {
       let fragment = String(line[sliceStart..<sliceEnd])
 
       let gutter: String
-      if vr.isFirst {
-        let isActiveLine = !state.hasSelection && vr.lineIndex == state.cursorLine
-        let isSelectedLine = lineIsSelected(lineIndex: vr.lineIndex, state: state)
-        let colorPrefix = (isActiveLine || isSelectedLine)
-          ? Terminal.bold + Terminal.ansiBlue209
-          : Terminal.grey
-        gutter = colorPrefix + String(format: "%4d", lineNum) + Terminal.reset + " "
+      if state.showLineNumbers {
+        if vr.isFirst {
+          let isActiveLine = !state.hasSelection && vr.lineIndex == state.cursorLine
+          let isSelectedLine = lineIsSelected(lineIndex: vr.lineIndex, state: state)
+          let colorPrefix = (isActiveLine || isSelectedLine)
+            ? Terminal.bold + Terminal.ansiBlue209
+            : Terminal.grey
+          gutter = colorPrefix + String(format: "%4d", lineNum) + Terminal.reset + " "
+        } else {
+          gutter = String(repeating: " ", count: gutterWidth)
+        }
       } else {
-        gutter = String(repeating: " ", count: 5)
+        gutter = String(repeating: " ", count: gutterWidth)
       }
 
       let trackHeight = maxVisibleRows
@@ -355,8 +360,8 @@ func drawEditor(state: inout EditorState) {
   }
 
   if bodyRowIndex < bodyEndLimit {
-    let filler = String(repeating: " ", count: 5)
-      + String(repeating: " ", count: contentWidth) + " "
+    let gutterFiller = String(repeating: " ", count: gutterWidth)
+    let filler = gutterFiller + String(repeating: " ", count: contentWidth) + " "
     for row in bodyRowIndex..<bodyEndLimit {
       frame[row] = filler
     }
@@ -471,7 +476,8 @@ func drawEditor(state: inout EditorState) {
       let cursorIndex = line.index(line.startIndex, offsetBy: safeCursor)
       let prefix = String(line[rowStartIndex..<cursorIndex])
       let cursorVisualOffset = Terminal.displayWidth(of: prefix)
-      let displayCol = 6 + cursorVisualOffset
+      let baseColumn = gutterWidth + 1
+      let displayCol = baseColumn + cursorVisualOffset
       cursorMove = Terminal.moveCursor(to: displayRow, col: displayCol)
       cursorCommand = state.cursorVisible ? Terminal.showCursor : Terminal.hideCursor
     }
@@ -484,7 +490,8 @@ func drawEditor(state: inout EditorState) {
     let cursorIndex = line.index(line.startIndex, offsetBy: safeCursor)
     let prefix = String(line[rowStartIndex..<cursorIndex])
     let cursorVisualOffset = Terminal.displayWidth(of: prefix)
-    let displayCol = 6 + cursorVisualOffset
+    let baseColumn = gutterWidth + 1
+    let displayCol = baseColumn + cursorVisualOffset
     cursorMove = Terminal.moveCursor(to: displayRow, col: displayCol)
     cursorCommand = state.cursorVisible ? Terminal.showCursor : Terminal.hideCursor
   }
@@ -556,6 +563,7 @@ private func makeControlHints() -> (String, Int) {
   let shortcuts: [(String, String)] = [
     ("⌃Q", "quit"),
     ("⌃S", "save"),
+    ("⌃L", "lines"),
     ("⌃Z", "undo"),
     ("⌃Y", "redo"),
     ("⌃C", "copy"),

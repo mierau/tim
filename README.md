@@ -18,6 +18,7 @@ The Mac-friendly command line text editor.
 - Status footer with live line/column counts and selection summaries.
 - Looks great in with or without terminal colors.
 - Mac-like `^Q` shortcut to quit.
+- Toggle line numbers with `⌃L`.
 - Open documents over HTTP(S).
 - Open text-friendly versions of Wikipedia articles.
 - Open RSS/Atom feeds and Bluesky profiles as readable plain text.

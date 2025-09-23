@@ -70,6 +70,8 @@ enum EditorController {
       case 24: cutSelection(state: &editorState)
       case 22: pasteClipboard(state: &editorState)
       case 19: saveDocument(state: &editorState)
+      case 12:
+        editorState.toggleLineNumbers()
       case 6:
         editorState.enterFindMode()
       case 7:

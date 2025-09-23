@@ -2,9 +2,11 @@ import Foundation
 
 func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
   let termSize = Terminal.getTerminalSize()
+  let leftInset = state.showLineNumbers ? 5 : 1
+
   if event.button >= 64 && event.button <= 67 {
     if event.isPress {
-      let contentWidth = max(1, termSize.cols - 6)
+      let contentWidth = max(1, termSize.cols - (leftInset + 1))
       let headerLines = 1
       let footerLines = 2
       let maxVisibleRows = max(1, termSize.rows - headerLines - footerLines)
@@ -127,13 +129,13 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
     }
     let contentTop = 2
     let localRow = event.y - contentTop
-    let editorCol = max(0, event.x - 6)
+    let editorCol = max(0, event.x - (leftInset + 1))
     if localRow >= 0 {
-      let contentWidth = max(1, termSize.cols - 6)
+      let contentWidth = max(1, termSize.cols - (leftInset + 1))
       let headerLines = 1
       let footerLines = 2
       let maxVisibleRows = max(1, termSize.rows - headerLines - footerLines)
-      let scrollbarColStart = 6 + contentWidth
+      let scrollbarColStart = leftInset + 1 + contentWidth
       if event.x >= scrollbarColStart {
         let snapshot = state.layoutCache.snapshot(for: state, contentWidth: contentWidth)
         let totalRows = max(snapshot.rows.count, 1)
@@ -341,11 +343,11 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
     if state.isDragging || state.isScrollbarDragging {
       let contentTop = 2
       let localRow = event.y - contentTop
-      let editorCol = max(0, event.x - 6)
+      let editorCol = max(0, event.x - (leftInset + 1))
       if localRow >= 0 {
         if state.isScrollbarDragging {
           let termSize = Terminal.getTerminalSize()
-          let contentWidth = max(1, termSize.cols - 6)
+          let contentWidth = max(1, termSize.cols - (leftInset + 1))
           let headerLines = 1
           let footerLines = 2
           let maxVisibleRows = max(1, termSize.rows - headerLines - footerLines)
@@ -367,7 +369,7 @@ func handleMouseEvent(event: MouseEvent, state: inout EditorState) {
           return
         }
         let termSize = Terminal.getTerminalSize()
-        let contentWidth = max(1, termSize.cols - 6)
+        let contentWidth = max(1, termSize.cols - (leftInset + 1))
         let snapshot = state.layoutCache.snapshot(for: state, contentWidth: contentWidth)
         let vrows = snapshot.rows
         guard !vrows.isEmpty else { return }
