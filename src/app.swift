@@ -53,6 +53,8 @@ struct Tim {
       performLoad { try DocumentLoader.fromRemote(url: url, lineNumber: line) }
     case .wikipedia(let title):
       performLoad { try DocumentLoader.fromWikipedia(title: title) }
+    case .rss(let url):
+      performLoad { try DocumentLoader.fromRSS(url: url) }
     }
   }
 }

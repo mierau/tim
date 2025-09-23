@@ -13,6 +13,7 @@ struct CLI {
     case standardInput(line: Int?)
     case remote(URL, line: Int?)
     case wikipedia(String)
+    case rss(URL)
   }
 
   enum ParserError: Error {
@@ -31,6 +32,7 @@ struct CLI {
     var filePath: String?
     var remoteURL: URL?
     var readFromStdin = false
+    var rssURL: URL?
     var acceptFlags = true
     var wikipediaTokens: [String] = []
 
@@ -52,6 +54,21 @@ struct CLI {
         break
       }
 
+      if acceptFlags && (arg == "-r" || arg == "--rss") {
+        index += 1
+        guard index < arguments.count else {
+          throw ParserError.missingArgument("Expected a URL after \(arg)")
+        }
+        let raw = arguments[index]
+        rssURL = parseURLFromString(raw)
+        guard rssURL != nil else {
+          throw ParserError.missingArgument("Invalid RSS URL provided")
+        }
+        index += 1
+        acceptFlags = false
+        continue
+      }
+
       if acceptFlags && arg == "--" {
         acceptFlags = false
         index += 1
@@ -70,8 +87,8 @@ struct CLI {
         continue
       }
 
-      if remoteURL == nil, filePath == nil, let url = URL(string: arg),
-        let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https"
+      if remoteURL == nil, filePath == nil,
+        let url = parseURLFromString(arg)
       {
         remoteURL = url
         index += 1
@@ -95,7 +112,7 @@ struct CLI {
     }
 
     if !wikipediaTokens.isEmpty {
-      if filePath != nil || remoteURL != nil || readFromStdin {
+      if filePath != nil || remoteURL != nil || readFromStdin || rssURL != nil {
         throw ParserError.invalidCombination("Cannot combine -w with other input sources")
       }
       let joined = wikipediaTokens.joined(separator: " ").trimmingCharacters(in: .whitespaces)
@@ -106,10 +123,17 @@ struct CLI {
     }
 
     if readFromStdin {
-      if filePath != nil {
+      if filePath != nil || rssURL != nil {
         throw ParserError.invalidCombination("Cannot combine '-' with a file path")
       }
       return .open(.standardInput(line: lineNumber))
+    }
+
+    if let rss = rssURL {
+      if filePath != nil || remoteURL != nil {
+        throw ParserError.invalidCombination("Cannot combine -r with other input sources")
+      }
+      return .open(.rss(rss))
     }
 
     if let url = remoteURL {
@@ -131,6 +155,7 @@ struct CLI {
       tim <file>                Open <file>
       tim <http(s) url>         Download URL into a new buffer (UTF-8 text only)
       tim -w <name>             Open the Wikipedia article matching <name>
+      tim -r <url>              Fetch and present the RSS/Atom feed at <url>
       tim <file>:+<line>        Open <file> and jump to <line> (1-based)
       tim +<line> <file>        Jump to <line> after loading <file>
       tim -- <file>             Treat following argument as a literal path
@@ -164,5 +189,15 @@ struct CLI {
     let pathPart = argument[..<range.lowerBound]
     guard !pathPart.isEmpty else { return (path: argument, line: line) }
     return (path: String(pathPart), line: line)
+  }
+
+  private static func parseURLFromString(_ argument: String) -> URL? {
+    if let url = URL(string: argument), let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+      return url
+    }
+    if let url = URL(string: "https://" + argument), let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+      return url
+    }
+    return nil
   }
 }

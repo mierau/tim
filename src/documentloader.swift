@@ -130,6 +130,77 @@ enum DocumentLoader {
     }
   }
 
+  /// Downloads and formats an RSS/Atom feed into a readable text buffer.
+  /// - Parameter url: The feed URL to fetch.
+  /// - Returns: `DocumentLoadResult` containing the rendered feed and suggested filename.
+  /// - Throws: `DocumentLoaderError` when the request fails, parsing fails, or the feed is empty.
+  static func fromRSS(url: URL, visited: Set<URL> = []) throws -> DocumentLoadResult {
+    var visited = visited
+    if visited.contains(url) {
+      throw DocumentLoaderError.userFacing("Encountered circular RSS reference for \(url.absoluteString)")
+    }
+    visited.insert(url)
+    let (data, response, error) = URLSession.shared.syncRequest(with: url)
+
+    if let error {
+      throw DocumentLoaderError.userFacing("Failed to fetch \(url.absoluteString): \(error.localizedDescription)")
+    }
+
+    if let http = response as? HTTPURLResponse,
+      !(200...299).contains(http.statusCode)
+    {
+      throw DocumentLoaderError.userFacing(
+        "Server responded with status \(http.statusCode) for \(url.absoluteString)")
+    }
+
+    guard let data else {
+      throw DocumentLoaderError.userFacing("No data received from \(url.absoluteString)")
+    }
+
+    do {
+      let feed = try RSSParser.parse(data: data)
+      if feed.items.isEmpty {
+        if let html = String(data: data, encoding: .utf8),
+          let discovered = discoverFeedURL(in: html, baseURL: url),
+          !visited.contains(discovered)
+        {
+          return try fromRSS(url: discovered, visited: visited)
+        }
+        throw DocumentLoaderError.userFacing("Feed '\(url.absoluteString)' contained no entries.")
+      }
+      let rendered = renderFeed(feed: feed, sourceURL: url)
+      let buffer = makeBuffer(from: rendered)
+      let cursor = initialCursor(for: nil, buffer: buffer)
+      let suggested = rssSuggestedFilename(title: feed.title, url: url)
+      let cwd = FileManager.default.currentDirectoryPath
+      let savePath = (cwd as NSString).appendingPathComponent(suggested)
+      return DocumentLoadResult(buffer: buffer, filePath: savePath, initialCursor: cursor)
+    } catch let error as DocumentLoaderError {
+      throw error
+    } catch let error as RSSParserError {
+      switch error {
+      case .invalidXML:
+        if let html = String(data: data, encoding: .utf8),
+          let discovered = discoverFeedURL(in: html, baseURL: url),
+          !visited.contains(discovered)
+        {
+          return try fromRSS(url: discovered, visited: visited)
+        }
+        throw DocumentLoaderError.userFacing(error.localizedDescription)
+      default:
+        throw DocumentLoaderError.userFacing(error.localizedDescription)
+      }
+    } catch {
+      if let html = String(data: data, encoding: .utf8),
+        let discovered = discoverFeedURL(in: html, baseURL: url),
+        !visited.contains(discovered)
+      {
+        return try fromRSS(url: discovered, visited: visited)
+      }
+      throw DocumentLoaderError.userFacing("Failed to parse RSS feed: \(error)")
+    }
+  }
+
   // MARK: - Helpers
 
   /// Converts raw bytes into sanitized UTF-8 text.
@@ -227,7 +298,7 @@ enum DocumentLoader {
       }
     }
 
-    return result
+    return result.replacingOccurrences(of: "\u{200C}", with: "")
   }
 
   /// Translates a 1-based line hint into a clamped buffer coordinate.
@@ -240,6 +311,288 @@ enum DocumentLoader {
     let zeroBased = max(0, lineNumber - 1)
     let clampedLine = min(zeroBased, max(0, buffer.count - 1))
     return (line: clampedLine, column: 0)
+  }
+
+  private static func rssSuggestedFilename(title: String?, url: URL) -> String {
+    let base: String
+    if let title, !title.isEmpty {
+      base = title
+    } else if let host = url.host, !host.isEmpty {
+      base = host
+    } else {
+      base = "feed"
+    }
+    let lowered = base.lowercased()
+    var slug = ""
+    slug.reserveCapacity(lowered.count)
+    for scalar in lowered.unicodeScalars {
+      if CharacterSet.alphanumerics.contains(scalar) {
+        slug.append(Character(scalar))
+      } else if scalar == " " || scalar == "-" || scalar == "_" {
+        slug.append("_")
+      }
+    }
+    while slug.contains("__") { slug = slug.replacingOccurrences(of: "__", with: "_") }
+    slug = slug.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+    if slug.isEmpty { slug = "feed" }
+    return slug + ".txt"
+  }
+
+  private static func renderFeed(feed: RSSFeed, sourceURL: URL) -> String {
+    var lines: [String] = []
+    let rawTitle = feed.title?.isEmpty == false ? feed.title! : sourceURL.absoluteString
+    let feedTitle = sanitizeContent(rawTitle)
+    lines.append(feedTitle)
+    let displayURL = cleanDisplayURL(from: sourceURL)
+    if !displayURL.isEmpty { lines.append(displayURL) }
+    lines.append(contentsOf: Array(repeating: "", count: 4))
+
+    var isFirstItem = true
+
+    for item in feed.items {
+      if isFirstItem {
+        isFirstItem = false
+      } else {
+        lines.append(contentsOf: Array(repeating: "", count: 4))
+      }
+      if let title = item.title, !title.isEmpty {
+        lines.append(title)
+        lines.append(String(repeating: "=", count: title.count))
+      }
+      if let date = item.publishedDate ?? item.updatedDate {
+        lines.append(formatDateWithOrdinal(date))
+      } else if let raw = item.publishedString ?? item.updatedString, !raw.isEmpty {
+        lines.append(raw)
+      }
+      let bodyText = item.summary ?? item.content
+      if let body = bodyText, !body.isEmpty {
+        let plain = sanitizeContent(htmlToPlainText(body))
+        let paragraphs = plain
+          .components(separatedBy: CharacterSet.newlines)
+          .map { $0.trimmingCharacters(in: .whitespaces) }
+          .filter { !$0.isEmpty }
+        if !paragraphs.isEmpty {
+          lines.append("")
+          var previousWasBullet = false
+          for (index, paragraph) in paragraphs.enumerated() {
+            let isBullet = paragraph.hasPrefix("• ")
+            if index > 0 && !(previousWasBullet && isBullet) {
+              lines.append("")
+            }
+            lines.append(paragraph)
+            previousWasBullet = isBullet
+          }
+        }
+      }
+    }
+
+    return lines.joined(separator: "\n")
+  }
+
+  private static func htmlToPlainText(_ string: String) -> String {
+    guard !string.isEmpty else { return string }
+    var text = string
+
+    // Render HTML lists as bullet lines before other transformations.
+    text = rewriteLists(text)
+
+    // Convert common break tags into newlines before stripping remaining tags.
+    text = text.replacingOccurrences(of: #"(?i)<br\s*/?>"#, with: "\n", options: .regularExpression)
+    text = text.replacingOccurrences(of: #"(?i)</p>"#, with: "\n", options: .regularExpression)
+    text = text.replacingOccurrences(of: #"(?i)</div>"#, with: "\n", options: .regularExpression)
+
+    // Replace anchor tags with "text (host)" pattern before stripping other tags.
+    text = rewriteAnchors(text)
+
+    // Remove residual HTML tags.
+    text = text.replacingOccurrences(of: #"<[^>]+>"#, with: " ", options: .regularExpression)
+
+    // Decode HTML entities.
+    text = decodeHTMLEntities(text)
+
+    // Normalize whitespace and trim.
+    text = text.replacingOccurrences(of: #"[ \t\u{00A0}]{2,}"#, with: " ", options: .regularExpression)
+    text = text.replacingOccurrences(of: "\u{00A0}", with: " ")
+
+    return text.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private static func decodeHTMLEntities(_ string: String) -> String {
+    let decoded: String
+    if let cfString = CFXMLCreateStringByUnescapingEntities(nil, string as CFString, nil) {
+      decoded = cfString as String
+    } else {
+      decoded = string
+    }
+    var cleaned = decoded
+    cleaned = cleaned.replacingOccurrences(of: "\u{200C}", with: "")
+    cleaned = cleaned.replacingOccurrences(of: "&zwnj;", with: "", options: [.caseInsensitive], range: nil)
+    cleaned = cleaned.replacingOccurrences(of: "&#8204;", with: "", options: [.caseInsensitive], range: nil)
+    return cleaned
+  }
+
+  private static func rewriteAnchors(_ html: String) -> String {
+    var result = html
+    let pattern = #"<a\s+[^>]*href=[\"']([^\"']+)[\"'][^>]*>(.+?)</a>"#
+    let regex: NSRegularExpression
+    do {
+      regex = try NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators])
+    } catch {
+      return html
+    }
+
+    while true {
+      guard let match = regex.firstMatch(in: result, options: [], range: NSRange(location: 0, length: result.utf16.count)) else {
+        break
+      }
+
+      let hrefRange = match.range(at: 1)
+      let textRange = match.range(at: 2)
+
+      guard let href = substring(result, range: hrefRange) else { break }
+      let rawText = substring(result, range: textRange) ?? ""
+      let strippedText = sanitizeContent(stripHTML(rawText)).trimmingCharacters(in: .whitespacesAndNewlines)
+
+      var cleanedURL = href.replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
+      if cleanedURL.hasSuffix("/") { cleanedURL.removeLast() }
+      let replacement = strippedText.isEmpty ? cleanedURL : "\(strippedText) (\(cleanedURL))"
+
+      let fullRange = match.range(at: 0)
+      guard let swiftRange = Range(fullRange, in: result) else { break }
+      result.replaceSubrange(swiftRange, with: replacement)
+    }
+
+    return result
+  }
+
+  private static func stripHTML(_ string: String) -> String {
+    return string.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+  }
+
+  private static func substring(_ string: String, range: NSRange) -> String? {
+    guard let swiftRange = Range(range, in: string) else { return nil }
+    return String(string[swiftRange])
+  }
+
+  private static func cleanDisplayURL(from url: URL) -> String {
+    let host = url.host ?? ""
+    let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    if host.isEmpty { return path }
+    if path.isEmpty { return host }
+    return host + "/" + path
+  }
+
+  private static func rewriteLists(_ html: String) -> String {
+    var result = html
+    let listPattern = #"<(ul|ol)[^>]*>(.*?)</\1>"#
+    let itemPattern = #"<li[^>]*>(.*?)</li>"#
+
+    guard let listRegex = try? NSRegularExpression(pattern: listPattern, options: [.caseInsensitive, .dotMatchesLineSeparators]),
+      let itemRegex = try? NSRegularExpression(pattern: itemPattern, options: [.caseInsensitive, .dotMatchesLineSeparators])
+    else {
+      return html
+    }
+
+    while true {
+      guard let match = listRegex.firstMatch(in: result, options: [], range: NSRange(location: 0, length: result.utf16.count)) else {
+        break
+      }
+
+      guard let listRange = Range(match.range(at: 0), in: result) else { break }
+      let listSubstring = String(result[listRange])
+      let items = itemRegex.matches(in: listSubstring, options: [], range: NSRange(location: 0, length: listSubstring.utf16.count))
+
+      var bullets: [String] = []
+      for itemMatch in items {
+        guard let itemRange = Range(itemMatch.range(at: 1), in: listSubstring) else { continue }
+        let itemHTML = String(listSubstring[itemRange])
+        let text = decodeHTMLEntities(stripHTML(itemHTML)).trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { continue }
+        bullets.append("• \(text)")
+      }
+
+      let replacement = bullets.isEmpty ? "" : "\n" + bullets.joined(separator: "\n") + "\n"
+      result.replaceSubrange(listRange, with: replacement)
+    }
+
+    return result
+  }
+
+  private static func discoverFeedURL(in html: String, baseURL: URL) -> URL? {
+    let pattern = #"<link[^>]+>"#
+    guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+      return nil
+    }
+
+    let matches = regex.matches(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count))
+    for match in matches {
+      guard let range = Range(match.range, in: html) else { continue }
+      let tag = String(html[range])
+      let attributes = parseLinkAttributes(tag)
+      guard let rel = attributes["rel"]?.lowercased(), rel.contains("alternate") else { continue }
+      let typeValue = attributes["type"]?.lowercased() ?? ""
+      let hrefValue = attributes["href"] ?? ""
+      var isFeed = false
+      if !(typeValue.isEmpty) {
+        if typeValue.contains("rss") || typeValue.contains("atom") || typeValue.contains("xml") {
+          isFeed = true
+        }
+      }
+      if !isFeed {
+        let hrefLower = hrefValue.lowercased()
+        if hrefLower.contains("rss") || hrefLower.contains("atom") || hrefLower.contains("feed") {
+          isFeed = true
+        }
+      }
+      guard isFeed else { continue }
+      let href = hrefValue.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !href.isEmpty else { continue }
+      if let resolved = URL(string: href, relativeTo: baseURL)?.absoluteURL {
+        return resolved
+      }
+    }
+    return nil
+  }
+
+  private static func parseLinkAttributes(_ tag: String) -> [String: String] {
+    var attributes: [String: String] = [:]
+    let pattern = #"(\w+)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))"#
+    guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+      return attributes
+    }
+    let range = NSRange(location: 0, length: tag.utf16.count)
+    for match in regex.matches(in: tag, options: [], range: range) {
+      guard let nameRange = Range(match.range(at: 1), in: tag) else { continue }
+      let name = tag[nameRange].lowercased()
+      let valueRange = (2...4).compactMap { Range(match.range(at: $0), in: tag) }.first
+      guard let vr = valueRange else { continue }
+      let rawValue = String(tag[vr]).trimmingCharacters(in: .whitespacesAndNewlines)
+      attributes[name] = rawValue
+    }
+    return attributes
+  }
+
+  private static func formatDateWithOrdinal(_ date: Date) -> String {
+    let calendar = Calendar(identifier: .gregorian)
+    let day = calendar.component(.day, from: date)
+    let suffix: String
+    switch day % 100 {
+    case 11, 12, 13:
+      suffix = "th"
+    default:
+      switch day % 10 {
+      case 1: suffix = "st"
+      case 2: suffix = "nd"
+      case 3: suffix = "rd"
+      default: suffix = "th"
+      }
+    }
+
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "MMMM d',' yyyy 'at' h:mm a"
+    let base = formatter.string(from: date)
+    return base.replacingOccurrences(of: "\(day)", with: "\(day)\(suffix)")
   }
 }
 
