@@ -118,6 +118,7 @@ struct EditorState {
   var isFindFieldDragging: Bool
   var isFindFieldWordSelection: Bool
   var selectionMode: SelectionMode
+  var lastFrameLines: [String] = []
   var isScrollbarDragging: Bool
   var pinCursorToView: Bool
   var filePath: String?

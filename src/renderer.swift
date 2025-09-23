@@ -7,6 +7,13 @@ private struct FindFieldRenderResult {
   let layout: EditorState.FindState.FindFieldLayout
 }
 
+/// Builds the find prompt status line and associated layout metadata for the footer.
+/// - Parameters:
+///   - state: Mutable editor state (updates view offset on the find field).
+///   - maxWidth: Maximum display width reserved for the status portion (excluding control hints).
+///   - statusColumnBase: The 1-based terminal column where the status text begins.
+///   - baseColor: ANSI color prefix applied to non-selected characters in the field.
+/// - Returns: The rendered status string plus layout details for hit-testing and cursor placement.
 private func buildFindStatus(
   state: inout EditorState, maxWidth: Int, statusColumnBase: Int, baseColor: String
 ) -> FindFieldRenderResult
@@ -95,6 +102,17 @@ private func buildFindStatus(
     layout: layout)
 }
 
+/// Renders a single visual row, applying selection and find-match highlighting.
+/// - Parameters:
+///   - lineContent: The substring of the logical line visible on this row.
+///   - lineIndex: Logical line index in the buffer.
+///   - state: Current editor state (used to consult selections, matches, etc.).
+///   - contentWidth: Width allocated for editor text (excluding gutter/scrollbar).
+///   - columnOffset: Logical column where this fragment begins.
+///   - isEndOfLogicalLine: Indicates whether this row terminates the underlying logical line.
+///   - highlightRanges: Optional ranges to highlight for find matches (columns relative to logical line).
+///   - highlightStyle: ANSI styling applied to the highlight ranges.
+/// - Returns: A rendered string ready to print for this row (excluding gutter and scrollbar).
 func renderLineWithSelection(
   lineContent: String, lineIndex: Int, state: EditorState, contentWidth: Int, columnOffset: Int = 0,
   isEndOfLogicalLine: Bool = true, highlightRanges: [Range<Int>] = [], highlightStyle: String? = nil
@@ -190,6 +208,11 @@ func renderLineWithSelection(
   return output
 }
 
+/// Computes the selection span intersecting a specific line.
+/// - Parameters:
+///   - state: Editor state containing the active selection.
+///   - lineIndex: The logical line index to inspect.
+/// - Returns: A tuple describing the selected column range, or `nil` when not selected.
 func selectionRangeForLine(state: EditorState, lineIndex: Int) -> (start: Int, end: Int)? {
   guard let startSel = state.selectionStart, let endSel = state.selectionEnd else { return nil }
   let (start, end) = state.normalizeSelection(start: startSel, end: endSel)
@@ -201,19 +224,25 @@ func selectionRangeForLine(state: EditorState, lineIndex: Int) -> (start: Int, e
   return (start: 0, end: lineLen)
 }
 
+/// Renders the entire editor view, diffing against the previous frame to minimize redraw.
+/// - Parameter state: Mutable editor state containing layout/cache information and prior frame data.
 func drawEditor(state: inout EditorState) {
   if state.buffer.isEmpty { state.buffer = [""] }
   state.clampCursor()
+
   let termSize = Terminal.getTerminalSize()
-  print(Terminal.clearScreen + Terminal.home, terminator: "")
+  let termRows = max(1, termSize.rows)
+  let termWidth = max(1, termSize.cols)
 
   let headerLines = 1
   let footerLines = 2
-  let maxVisibleRows = termSize.rows - headerLines - footerLines
-  let contentWidth = termSize.cols - 6
-  let width = max(1, contentWidth)
+  let maxVisibleRows = max(0, termRows - headerLines - footerLines)
+  let contentWidth = max(1, termWidth - 6)
+  let layoutWidth = contentWidth
 
-  var visualRows = state.layoutCache.snapshot(for: state, contentWidth: width).rows
+  var frame = Array(repeating: String(repeating: " ", count: termWidth), count: termRows)
+
+  var visualRows = state.layoutCache.snapshot(for: state, contentWidth: layoutWidth).rows
   if visualRows.isEmpty {
     let fallbackLine = min(state.cursorLine, max(0, state.buffer.count - 1))
     visualRows = [VisualRow(lineIndex: fallbackLine, start: 0, end: 0, isFirst: true, isEndOfLine: true)]
@@ -245,8 +274,6 @@ func drawEditor(state: inout EditorState) {
 
   // Header
   let filename = state.displayFilename
-  let termWidth = termSize.cols
-
   let spaceAroundTitle = 1
   let indicatorText = state.isDirty ? "• " : ""
   let indicatorVisibleWidth = Terminal.displayWidth(of: indicatorText)
@@ -267,36 +294,44 @@ func drawEditor(state: inout EditorState) {
     ? Terminal.grey + String(repeating: barCharacter, count: rightCount) + Terminal.reset
     : ""
   let headerLine = leftDecoration + decoratedDisplay + rightDecoration
-  print(headerLine)
+  if termRows > 0 { frame[0] = headerLine }
 
-  // Body
+  // Body rows (visible content + filler)
   let startV = max(0, min(vScroll, max(0, totalRows - 1)))
   let endV = min(totalRows, startV + maxVisibleRows)
-  if startV < endV {
+  let bodyStartIndex = headerLines
+  let bodyEndLimit = max(bodyStartIndex, min(termRows - footerLines, termRows))
+  var bodyRowIndex = bodyStartIndex
+
+  if startV < endV && bodyRowIndex < bodyEndLimit {
     for vi in startV..<endV {
+      if bodyRowIndex >= bodyEndLimit { break }
       let vr = visualRows[vi]
       let lineNum = vr.lineIndex + 1
       let line = state.buffer[vr.lineIndex]
       let sliceStart = line.index(line.startIndex, offsetBy: vr.start)
       let sliceEnd = line.index(line.startIndex, offsetBy: vr.end)
       let fragment = String(line[sliceStart..<sliceEnd])
+
+      let gutter: String
       if vr.isFirst {
         let isActiveLine = !state.hasSelection && vr.lineIndex == state.cursorLine
         let isSelectedLine = lineIsSelected(lineIndex: vr.lineIndex, state: state)
         let colorPrefix = (isActiveLine || isSelectedLine)
           ? Terminal.bold + Terminal.ansiBlue209
           : Terminal.grey
-        print(colorPrefix + String(format: "%4d", lineNum) + Terminal.reset + " ", terminator: "")
+        gutter = colorPrefix + String(format: "%4d", lineNum) + Terminal.reset + " "
       } else {
-        print(String(repeating: " ", count: 5), terminator: "")
+        gutter = String(repeating: " ", count: 5)
       }
-      // Scrollbar
+
       let trackHeight = maxVisibleRows
       let (handleStart, handleHeight, _) = Scrollbar.compute(
         totalRows: totalRows, trackHeight: trackHeight, offset: state.visualScrollOffset)
       let localRow = vi - startV
       let isHandle = handleHeight > 0 && localRow >= handleStart && localRow < handleStart + handleHeight
       let scrollbarChar = isHandle ? (Terminal.scrollbarBG + " " + Terminal.reset) : " "
+
       var matchHighlights: [Range<Int>] = []
       var highlightStyle: String? = nil
       if state.find.active, state.focusedControl == .findField, !state.find.field.text.isEmpty {
@@ -313,32 +348,30 @@ func drawEditor(state: inout EditorState) {
         lineContent: fragment, lineIndex: vr.lineIndex, state: state, contentWidth: contentWidth,
         columnOffset: vr.start, isEndOfLogicalLine: vr.isEndOfLine, highlightRanges: matchHighlights,
         highlightStyle: highlightStyle)
-      print(lineOut + scrollbarChar)
+
+      frame[bodyRowIndex] = gutter + lineOut + scrollbarChar
+      bodyRowIndex += 1
     }
   }
 
-  // Fill remaining rows
-  let targetRows = startV + maxVisibleRows
-  if endV < targetRows {
-    let trackHeight = maxVisibleRows
-    let (handleStart, handleHeight, _) = Scrollbar.compute(
-      totalRows: totalRows, trackHeight: trackHeight, offset: state.visualScrollOffset)
-    for i in endV..<targetRows {
-      let localRow = i - startV
-      let isHandle = handleHeight > 0 && localRow >= handleStart && localRow < handleStart + handleHeight
-      let scrollbarChar = isHandle ? (Terminal.scrollbarBG + " " + Terminal.reset) : " "
-      print(String(repeating: " ", count: 5), terminator: "")
-      print(String(repeating: " ", count: contentWidth) + scrollbarChar)
+  if bodyRowIndex < bodyEndLimit {
+    let filler = String(repeating: " ", count: 5)
+      + String(repeating: " ", count: contentWidth) + " "
+    for row in bodyRowIndex..<bodyEndLimit {
+      frame[row] = filler
     }
   }
 
-  // Footer
+  if termRows >= 2 {
+    frame[termRows - 2] = Terminal.reset + String(repeating: " ", count: termWidth)
+  }
+
+  // Footer preparation
   var controlHints: String
   var controlHintsLength: Int
   var statusText: String
   var statusColor: String
   var statusDisplayWidth: Int
-
   var pendingFindLayout: EditorState.FindState.FindFieldLayout? = nil
 
   if state.find.active {
@@ -382,56 +415,55 @@ func drawEditor(state: inout EditorState) {
     state.find.lastLayout = nil
   }
 
-  if state.find.active {
-    let leftWidth = statusDisplayWidth
-    let rightWidth = controlHintsLength
-    let spacing = max(1, termWidth - 2 - leftWidth - rightWidth)
-    if var layout = pendingFindLayout {
-      layout.clickableFieldEndColumn = min(termWidth, layout.fieldEndColumn + spacing)
-      pendingFindLayout = layout
-      state.find.lastLayout = layout
+  let footerRowIndex = termRows - 1
+  if footerRowIndex >= 0 {
+    if state.find.active {
+      let leftWidth = statusDisplayWidth
+      let rightWidth = controlHintsLength
+      let spacing = max(1, termWidth - 2 - leftWidth - rightWidth)
+      if var layout = pendingFindLayout {
+        layout.clickableFieldEndColumn = min(termWidth, layout.fieldEndColumn + spacing)
+        pendingFindLayout = layout
+        state.find.lastLayout = layout
+      }
+      let footerLine = " " + statusColor + statusText + Terminal.reset
+        + String(repeating: " ", count: spacing) + controlHints
+      frame[footerRowIndex] = footerLine
+    } else {
+      let totalLength = 1 + controlHintsLength + 1 + statusDisplayWidth + 1
+      let padding = max(0, termWidth - totalLength)
+      let footerLine =
+        " " + controlHints + String(repeating: " ", count: padding + 1) + statusColor + statusText
+        + Terminal.reset
+      frame[footerRowIndex] = footerLine
     }
-    let footerRow = termSize.rows
-    let footerLine = " " + statusColor + statusText + Terminal.reset
-      + String(repeating: " ", count: spacing) + controlHints
-    print(Terminal.moveCursor(to: footerRow, col: 1) + footerLine, terminator: "")
+  }
 
+  // Diff against previous frame
+  for row in 0..<frame.count {
+    let old = row < state.lastFrameLines.count ? state.lastFrameLines[row] : ""
+    let new = frame[row]
+    if old != new {
+      print(Terminal.moveCursor(to: row + 1, col: 1) + new, terminator: "")
+    }
+  }
+
+  state.lastFrameLines = frame
+
+  // Cursor placement
+  let cursorVisibleInView =
+    maxVisibleRows > 0 && cursorVIndex >= vScroll && cursorVIndex < vScroll + maxVisibleRows
+  var cursorMove: String? = nil
+  var cursorCommand = Terminal.hideCursor
+
+  if state.find.active {
+    let footerRow = termRows
     if state.focusedControl == .findField {
       let caretColumn = max(1, min(termWidth, state.find.lastLayout?.caretColumn ?? termWidth))
-      print(Terminal.moveCursor(to: footerRow, col: caretColumn), terminator: "")
-      print(state.find.cursorVisible ? Terminal.showCursor : Terminal.hideCursor, terminator: "")
-    } else {
-      let cursorVisibleInView =
-        maxVisibleRows > 0 && cursorVIndex >= vScroll && cursorVIndex < vScroll + maxVisibleRows
-      if cursorVisibleInView {
-        let displayRow = 2 + (cursorVIndex - vScroll)
-        let line = state.buffer[state.cursorLine]
-        let safeStart = min(cursorVRow.start, line.count)
-        let safeCursor = min(state.cursorColumn, line.count)
-        let rowStartIndex = line.index(line.startIndex, offsetBy: safeStart)
-        let cursorIndex = line.index(line.startIndex, offsetBy: safeCursor)
-        let prefix = String(line[rowStartIndex..<cursorIndex])
-        let cursorVisualOffset = Terminal.displayWidth(of: prefix)
-        let displayCol = 6 + cursorVisualOffset
-        print(Terminal.moveCursor(to: displayRow, col: displayCol), terminator: "")
-        print(state.cursorVisible ? Terminal.showCursor : Terminal.hideCursor, terminator: "")
-      } else {
-        print(Terminal.hideCursor, terminator: "")
-      }
-    }
-  } else {
-    let totalLength = 1 + controlHintsLength + 1 + statusDisplayWidth + 1
-    let padding = max(0, termWidth - totalLength)
-    let footerRow = termSize.rows
-    let footerLine =
-      " " + controlHints + String(repeating: " ", count: padding + 1) + statusColor + statusText
-      + Terminal.reset
-    print(Terminal.moveCursor(to: footerRow, col: 1) + footerLine, terminator: "")
-
-    let cursorVisibleInView =
-      maxVisibleRows > 0 && cursorVIndex >= vScroll && cursorVIndex < vScroll + maxVisibleRows
-    if cursorVisibleInView {
-      let displayRow = 2 + (cursorVIndex - vScroll)
+      cursorMove = Terminal.moveCursor(to: footerRow, col: caretColumn)
+      cursorCommand = state.find.cursorVisible ? Terminal.showCursor : Terminal.hideCursor
+    } else if cursorVisibleInView {
+      let displayRow = headerLines + 1 + (cursorVIndex - vScroll)
       let line = state.buffer[state.cursorLine]
       let safeStart = min(cursorVRow.start, line.count)
       let safeCursor = min(state.cursorColumn, line.count)
@@ -440,15 +472,31 @@ func drawEditor(state: inout EditorState) {
       let prefix = String(line[rowStartIndex..<cursorIndex])
       let cursorVisualOffset = Terminal.displayWidth(of: prefix)
       let displayCol = 6 + cursorVisualOffset
-      print(Terminal.moveCursor(to: displayRow, col: displayCol), terminator: "")
-      print(state.cursorVisible ? Terminal.showCursor : Terminal.hideCursor, terminator: "")
-    } else {
-      print(Terminal.hideCursor, terminator: "")
+      cursorMove = Terminal.moveCursor(to: displayRow, col: displayCol)
+      cursorCommand = state.cursorVisible ? Terminal.showCursor : Terminal.hideCursor
     }
+  } else if cursorVisibleInView {
+    let displayRow = headerLines + 1 + (cursorVIndex - vScroll)
+    let line = state.buffer[state.cursorLine]
+    let safeStart = min(cursorVRow.start, line.count)
+    let safeCursor = min(state.cursorColumn, line.count)
+    let rowStartIndex = line.index(line.startIndex, offsetBy: safeStart)
+    let cursorIndex = line.index(line.startIndex, offsetBy: safeCursor)
+    let prefix = String(line[rowStartIndex..<cursorIndex])
+    let cursorVisualOffset = Terminal.displayWidth(of: prefix)
+    let displayCol = 6 + cursorVisualOffset
+    cursorMove = Terminal.moveCursor(to: displayRow, col: displayCol)
+    cursorCommand = state.cursorVisible ? Terminal.showCursor : Terminal.hideCursor
   }
+
+  if let move = cursorMove {
+    print(move, terminator: "")
+  }
+  print(cursorCommand, terminator: "")
   fflush(stdout)
 }
 
+/// Produces the footer status text (line/column or selection summary) and its color.
 private func makeStatusLine(state: EditorState) -> (text: String, color: String) {
   if state.find.active {
     let prefix = state.focusedControl == .document ? "Find ▷ " : "Find: "
@@ -467,11 +515,13 @@ private func makeStatusLine(state: EditorState) -> (text: String, color: String)
   return ("lns \(lineCount), chars \(characterCount)", Terminal.grey)
 }
 
+/// Counts the number of logical lines covered by the current selection.
 private func countSelectedLines(in state: EditorState, from start: (line: Int, column: Int), to end: (line: Int, column: Int)) -> Int {
   if start.line == end.line { return 1 }
   return max(1, end.line - start.line + 1)
 }
 
+/// Computes the character count of the selection, including newline separators.
 private func countSelectedCharacters(in state: EditorState, from start: (line: Int, column: Int), to end: (line: Int, column: Int)) -> Int {
   if start.line == end.line {
     return max(0, end.column - start.column)
@@ -488,6 +538,7 @@ private func countSelectedCharacters(in state: EditorState, from start: (line: I
   return total + newlineCount
 }
 
+/// Indicates whether the specified line falls within the active selection.
 private func lineIsSelected(lineIndex: Int, state: EditorState) -> Bool {
   guard state.hasSelection, let startSel = state.selectionStart, let endSel = state.selectionEnd else {
     return false
@@ -500,6 +551,7 @@ private func lineIsSelected(lineIndex: Int, state: EditorState) -> Bool {
   return lineIndex >= start.line && lineIndex <= end.line
 }
 
+/// Builds the footer control-hint string and reports its display width.
 private func makeControlHints() -> (String, Int) {
   let shortcuts: [(String, String)] = [
     ("⌃Q", "quit"),
