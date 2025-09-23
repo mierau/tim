@@ -22,6 +22,12 @@ enum DocumentLoaderError: Error {
 }
 
 enum DocumentLoader {
+  /// Prepares a document from a local filesystem path.
+  /// - Parameters:
+  ///   - path: The user-supplied path (tilde may be expanded).
+  ///   - lineNumber: Optional 1-based line hint for the resulting cursor.
+  /// - Returns: A `DocumentLoadResult` containing the buffer and metadata.
+  /// - Throws: `DocumentLoaderError` describing user-facing failures.
   static func fromFile(path rawPath: String, lineNumber: Int?) throws -> DocumentLoadResult {
     let expandedPath = (rawPath as NSString).expandingTildeInPath
     let fileURL = URL(fileURLWithPath: expandedPath)
@@ -46,6 +52,10 @@ enum DocumentLoader {
     }
   }
 
+  /// Reads all stdin data and converts it into a document buffer.
+  /// - Parameter lineNumber: Optional 1-based line hint for the resulting cursor.
+  /// - Returns: A prepared `DocumentLoadResult` without a backing file path.
+  /// - Throws: `DocumentLoaderError` on decoding issues.
   static func fromStandardInput(lineNumber: Int?) throws -> DocumentLoadResult {
     let data = FileHandle.standardInput.readDataToEndOfFile()
     do {
@@ -60,6 +70,12 @@ enum DocumentLoader {
     }
   }
 
+  /// Downloads text content from `url` and stores a suggested filename.
+  /// - Parameters:
+  ///   - url: The remote resource to fetch (HTTP/S only).
+  ///   - lineNumber: Optional 1-based line hint for the resulting cursor.
+  /// - Returns: A `DocumentLoadResult` containing the fetched buffer and save path.
+  /// - Throws: `DocumentLoaderError` when the request fails or the data is unsuitable.
   static func fromRemote(url: URL, lineNumber: Int?) throws -> DocumentLoadResult {
     let (data, response, error) = URLSession.shared.syncRequest(with: url)
 
@@ -92,6 +108,10 @@ enum DocumentLoader {
     }
   }
 
+  /// Fetches a Wikipedia extract and formats it as a plain-text buffer.
+  /// - Parameter title: The human-readable article title (whitespace trimmed internally).
+  /// - Returns: A `DocumentLoadResult` with a suggested `.txt` filename.
+  /// - Throws: `DocumentLoaderError` wrapping `WikipediaError` messages.
   static func fromWikipedia(title: String) throws -> DocumentLoadResult {
     do {
       let article = try fetchWikipediaArticle(title: title)
@@ -112,6 +132,10 @@ enum DocumentLoader {
 
   // MARK: - Helpers
 
+  /// Converts raw bytes into sanitized UTF-8 text.
+  /// - Parameter data: The raw file or response payload.
+  /// - Returns: A normalized string (always using `\n` newlines and sanitized control chars).
+  /// - Throws: `DocumentDataError` if the data appears binary or not UTF-8.
   private static func makeTextContent(from data: Data) throws -> String {
     guard !dataLooksBinary(data) else { throw DocumentDataError.binary }
     guard let content = String(data: data, encoding: .utf8) else {
@@ -120,6 +144,9 @@ enum DocumentLoader {
     return sanitizeContent(content)
   }
 
+  /// Splits the provided text into logical lines, preserving empty trailing lines.
+  /// - Parameter content: Sanitized editor text.
+  /// - Returns: An array of lines (never empty; at least one empty string).
   private static func makeBuffer(from content: String) -> [String] {
     let normalized = content
       .replacingOccurrences(of: "\r\n", with: "\n")
@@ -128,6 +155,9 @@ enum DocumentLoader {
     return lines.isEmpty ? [""] : lines
   }
 
+  /// Heuristically detects binary data by sampling the first kilobyte for control bytes.
+  /// - Parameter data: The raw blob to inspect.
+  /// - Returns: `true` when the sample suggests the content is binary.
   private static func dataLooksBinary(_ data: Data) -> Bool {
     if data.isEmpty { return false }
     var checked = 0
@@ -143,6 +173,9 @@ enum DocumentLoader {
     return Double(controlCount) / Double(checked) > 0.3
   }
 
+  /// Builds a filesystem-friendly save path for downloaded content.
+  /// - Parameter url: The source URL whose last path component is used.
+  /// - Returns: A path under the current working directory.
   private static func derivedSavePath(for url: URL) -> String {
     var candidate = url.lastPathComponent
     if let decoded = candidate.removingPercentEncoding { candidate = decoded }
@@ -157,6 +190,9 @@ enum DocumentLoader {
     return (cwd as NSString).appendingPathComponent(sanitized)
   }
 
+  /// Normalizes control characters and newline variants into editor-friendly text.
+  /// - Parameter text: The raw text prior to sanitization.
+  /// - Returns: A string containing only `\n` newlines and visible spacing for control chars.
   private static func sanitizeContent(_ text: String) -> String {
     var result = String()
     result.reserveCapacity(text.count)
@@ -194,6 +230,11 @@ enum DocumentLoader {
     return result
   }
 
+  /// Translates a 1-based line hint into a clamped buffer coordinate.
+  /// - Parameters:
+  ///   - lineNumber: The optional user-specified line (1-based).
+  ///   - buffer: The target buffer to clamp against.
+  /// - Returns: A cursor tuple or `nil` when no hint was provided.
   private static func initialCursor(for lineNumber: Int?, buffer: [String]) -> (line: Int, column: Int)? {
     guard let lineNumber else { return nil }
     let zeroBased = max(0, lineNumber - 1)
