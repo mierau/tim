@@ -62,8 +62,11 @@ struct CLI {
           throw ParserError.missingArgument("Expected a URL after \(arg)")
         }
         let raw = arguments[index]
-        rssURL = parseURLFromString(raw)
-        guard rssURL != nil else {
+        if let url = parseURLFromString(raw) {
+          rssURL = url
+        } else if let lenient = parseLenientRSSURL(raw) {
+          rssURL = lenient
+        } else {
           throw ParserError.missingArgument("Invalid RSS URL provided")
         }
         index += 1
@@ -146,7 +149,20 @@ struct CLI {
       if filePath != nil || remoteURL != nil {
         throw ParserError.invalidCombination("Cannot combine -r with other input sources")
       }
-      return .open(.rss(rss))
+      let normalized: URL
+      if rss.scheme == nil {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.scheme = "https"
+        components.host = rss.host?.isEmpty == false ? rss.host : rss.path
+        components.path = rss.host?.isEmpty == false ? rss.path : ""
+        components.query = rss.query
+        components.fragment = rss.fragment
+        normalized = components.url ?? URL(string: "https://\(rss.absoluteString)") ?? rss
+      } else {
+        normalized = rss
+      }
+      return .open(.rss(normalized))
     }
 
     if let handle = blueskyHandle {
@@ -217,5 +233,11 @@ struct CLI {
       return nil
     }
     return (scheme == "http" || scheme == "https") ? url : nil
+  }
+
+  private static func parseLenientRSSURL(_ argument: String) -> URL? {
+    if argument.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return nil }
+    if argument.contains("://") { return nil }
+    return URL(string: "https://" + argument)
   }
 }

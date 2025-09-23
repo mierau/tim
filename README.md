@@ -17,7 +17,7 @@ The Mac-friendly command line text editor.
 - Automatic detection of binary files.
 - Status footer with live line/column counts and selection summaries.
 - Looks great in with or without terminal colors.
-- Mac-like `^Q` shortcut to quit.
+- Mac-like `^Q` and `^W` shortcuts to close.
 - Toggle line numbers with `⌃L`.
 - Open documents over HTTP(S).
 - Open text-friendly versions of Wikipedia articles.

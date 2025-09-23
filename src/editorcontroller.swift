@@ -70,7 +70,8 @@ enum EditorController {
       }
 
       switch key {
-      case 17: running = false
+      case 17, 23:
+        running = false
       case 3: copySelection(state: &editorState)
       case 24: cutSelection(state: &editorState)
       case 22: pasteClipboard(state: &editorState)
@@ -100,7 +101,6 @@ enum EditorController {
         case 5: moveToEndOfLine(state: &editorState)
         case 11: deleteToEndOfLine(state: &editorState)
         case 2: moveToBeginningOfLine(state: &editorState)
-        case 23: smartDeleteBackward(state: &editorState)
         case 21: selectLineUp(state: &editorState)
         case 4: selectLineDown(state: &editorState)
       default:

@@ -669,7 +669,7 @@ private func makeControlHints(state: EditorState) -> (String, Int) {
   }()
 
   var shortcuts: [(String, String)] = [
-    ("⌃Q", "quit")
+    ("⌃W", "close")
   ]
 
   if !hasDocumentSelection {
