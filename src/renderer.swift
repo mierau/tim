@@ -18,8 +18,8 @@ private func buildFindStatus(
   state: inout EditorState, maxWidth: Int, statusColumnBase: Int, baseColor: String
 ) -> FindFieldRenderResult
 {
-  let prefix = "Find: "
-  let prefixWidth = Terminal.displayWidth(of: prefix)
+  let prefixRaw = "Find: "
+  let prefixWidth = Terminal.displayWidth(of: prefixRaw)
   let fieldWidth = max(1, maxWidth - prefixWidth)
 
   let characters = Array(state.find.field.text)
@@ -61,7 +61,7 @@ private func buildFindStatus(
   state.find.field.viewOffset = viewOffset
 
   let selection = state.find.field.selection
-  var statusText = Terminal.grey + prefix + Terminal.white
+  var statusText = Terminal.dim + prefixRaw + Terminal.reset + Terminal.bold
   var columns: [EditorState.FindState.FindFieldLayout.Column] = []
   var columnPosition = prefixWidth
 
@@ -70,7 +70,7 @@ private func buildFindStatus(
     let width = widths[idx]
     let charString = String(character)
     if selection?.contains(idx) ?? false {
-      statusText += Terminal.highlight + charString + Terminal.reset + Terminal.white
+      statusText += Terminal.highlight + charString + Terminal.reset + Terminal.bold
     } else {
       statusText += charString
     }
@@ -111,34 +111,44 @@ private func buildFindStatus(
 ///   - contentWidth: Width allocated for editor text (excluding gutter/scrollbar).
 ///   - columnOffset: Logical column where this fragment begins.
 ///   - isEndOfLogicalLine: Indicates whether this row terminates the underlying logical line.
-///   - highlightRanges: Optional ranges to highlight for find matches (columns relative to logical line).
-///   - highlightStyle: ANSI styling applied to the highlight ranges.
+///   - highlightSegments: Optional list of ranges paired with a flag indicating the active match.
 /// - Returns: A rendered string ready to print for this row (excluding gutter and scrollbar).
 func renderLineWithSelection(
   lineContent: String, lineIndex: Int, state: EditorState, contentWidth: Int, columnOffset: Int = 0,
-  isEndOfLogicalLine: Bool = true, highlightRanges: [Range<Int>] = [], highlightStyle: String? = nil
+  isEndOfLogicalLine: Bool = true, highlightSegments: [(Range<Int>, Bool)] = []
 ) -> String {
   var output = ""
   let logicalLineLength = state.buffer[lineIndex].count
   var renderedWidth = 0
   var columnIndex = 0
-  let sortedHighlights = highlightRanges.sorted { $0.lowerBound < $1.lowerBound }
-  var highlightIndex = 0
+  let sortedHighlights = highlightSegments.sorted { $0.0.lowerBound < $1.0.lowerBound }
   for char in lineContent {
     let isSelected = state.isPositionSelected(line: lineIndex, column: columnIndex + columnOffset)
     let charString = String(char)
     let globalColumn = columnIndex + columnOffset
-    var isFindHighlighted = false
-    while highlightIndex < sortedHighlights.count && sortedHighlights[highlightIndex].upperBound <= globalColumn {
-      highlightIndex += 1
+    var isHighlighted = false
+    var isActiveHighlight = false
+    for (range, isActive) in sortedHighlights {
+      if range.lowerBound > globalColumn { break }
+      if range.contains(globalColumn) {
+        isHighlighted = true
+        isActiveHighlight = isActive
+        break
+      }
     }
-    if highlightIndex < sortedHighlights.count && sortedHighlights[highlightIndex].contains(globalColumn) {
-      isFindHighlighted = true
-    }
+
     if isSelected {
-      output += Terminal.highlight + charString + Terminal.reset
-    } else if isFindHighlighted, let style = highlightStyle {
-      output += style + charString + Terminal.reset
+      if isHighlighted && isActiveHighlight {
+        output += Terminal.highlightBold + charString + Terminal.reset
+      } else {
+        output += Terminal.highlight + charString + Terminal.reset
+      }
+    } else if isHighlighted {
+      if isActiveHighlight {
+        output += Terminal.highlightBold + charString + Terminal.reset
+      } else {
+        output += Terminal.highlight + charString + Terminal.reset
+      }
     } else {
       output += charString
     }
@@ -239,7 +249,7 @@ func drawEditor(state: inout EditorState) {
   let footerLines = 2
   let maxVisibleRows = max(0, termRows - headerLines - footerLines)
   let gutterWidth = state.showLineNumbers ? 5 : 1
-  let contentWidth = max(1, termWidth - (gutterWidth + 1))
+  let contentWidth = max(1, termWidth - (gutterWidth + 2))
   let layoutWidth = contentWidth
 
   var frame = Array(repeating: String(repeating: " ", count: termWidth), count: termRows)
@@ -315,16 +325,16 @@ func drawEditor(state: inout EditorState) {
   let availableWidth = max(0, termWidth - displayWidth)
   let leftCount = availableWidth / 2
   let rightCount = availableWidth - leftCount
-  let barCharacter = "\u{2550}"
+  let barCharacter = "\u{2500}"
   let indicatorStyled = state.isDirty ? "\(Terminal.white)•\(Terminal.reset) " : ""
   let decoratedDisplay = String(repeating: " ", count: spaceAroundTitle)
     + indicatorStyled + Terminal.bold + filename + Terminal.reset
     + String(repeating: " ", count: spaceAroundTitle)
   let leftDecoration = leftCount > 0
-    ? Terminal.grey + String(repeating: barCharacter, count: leftCount) + Terminal.reset
+    ? Terminal.dim + String(repeating: barCharacter, count: leftCount) + Terminal.reset
     : ""
   let rightDecoration = rightCount > 0
-    ? Terminal.grey + String(repeating: barCharacter, count: rightCount) + Terminal.reset
+    ? Terminal.dim + String(repeating: barCharacter, count: rightCount) + Terminal.reset
     : ""
   let headerLine = leftDecoration + decoratedDisplay + rightDecoration
   if termRows > 0 { frame[0] = headerLine }
@@ -352,8 +362,8 @@ func drawEditor(state: inout EditorState) {
           let isActiveLine = !state.hasSelection && vr.lineIndex == state.cursorLine
           let isSelectedLine = lineIsSelected(lineIndex: vr.lineIndex, state: state)
           let colorPrefix = (isActiveLine || isSelectedLine)
-            ? Terminal.bold + Terminal.ansiBlue209
-            : Terminal.grey
+            ? Terminal.bold + Terminal.white
+            : Terminal.dim
           gutter = colorPrefix + String(format: "%4d", lineNum) + Terminal.reset + " "
         } else {
           gutter = String(repeating: " ", count: gutterWidth)
@@ -367,33 +377,30 @@ func drawEditor(state: inout EditorState) {
         totalRows: totalRows, trackHeight: trackHeight, offset: state.visualScrollOffset)
       let localRow = vi - startV
       let isHandle = handleHeight > 0 && localRow >= handleStart && localRow < handleStart + handleHeight
-      let scrollbarChar = isHandle ? (Terminal.scrollbarBG + " " + Terminal.reset) : " "
+      let scrollbarChar = isHandle
+        ? (Terminal.highlight + " " + Terminal.reset)
+        : " "
 
-      var matchHighlights: [Range<Int>] = []
-      var highlightStyle: String? = nil
+      var highlightSegments: [(Range<Int>, Bool)] = []
       if state.find.active, state.focusedControl == .findField, !state.find.field.text.isEmpty {
-        matchHighlights = state.find.matches.enumerated().compactMap { index, match in
-          guard match.line == vr.lineIndex, index != state.find.currentIndex else { return nil }
-          return match.range
-        }
-        if !matchHighlights.isEmpty {
-          highlightStyle = Terminal.bold + Terminal.ansiBlue209
+        highlightSegments = state.find.matches.enumerated().compactMap { index, match in
+          guard match.line == vr.lineIndex else { return nil }
+          return (match.range, index == state.find.currentIndex)
         }
       }
 
       let lineOut = renderLineWithSelection(
         lineContent: fragment, lineIndex: vr.lineIndex, state: state, contentWidth: contentWidth,
-        columnOffset: vr.start, isEndOfLogicalLine: vr.isEndOfLine, highlightRanges: matchHighlights,
-        highlightStyle: highlightStyle)
+        columnOffset: vr.start, isEndOfLogicalLine: vr.isEndOfLine, highlightSegments: highlightSegments)
 
-      frame[bodyRowIndex] = gutter + lineOut + scrollbarChar
+      frame[bodyRowIndex] = gutter + lineOut + " " + scrollbarChar
       bodyRowIndex += 1
     }
   }
 
   if bodyRowIndex < bodyEndLimit {
     let gutterFiller = String(repeating: " ", count: gutterWidth)
-    let filler = gutterFiller + String(repeating: " ", count: contentWidth) + " "
+    let filler = gutterFiller + String(repeating: " ", count: contentWidth) + "  "
     for row in bodyRowIndex..<bodyEndLimit {
       frame[row] = filler
     }
@@ -437,36 +444,33 @@ func drawEditor(state: inout EditorState) {
     }
 
     let infoText: String = {
-      if let error = state.find.regexError {
-        return "regex error: \(error)"
-      }
-      guard !state.find.field.text.isEmpty else { return "" }
-      let total = state.find.matches.count
-      if total == 0 { return "0/0" }
-      return "\(state.find.currentIndex + 1)/\(total)"
-    }()
+    guard !state.find.field.text.isEmpty else { return "" }
+    let total = state.find.matches.count
+    if total == 0 { return "0/0" }
+    return "\(state.find.currentIndex + 1)/\(total)"
+  }()
 
     let infoSegment: HintSegment? = infoText.isEmpty
       ? nil
-      : makeSegment(plain: infoText, rendered: Terminal.brightBlack + infoText + Terminal.reset)
+      : makeSegment(plain: infoText, rendered: Terminal.dim + infoText + Terminal.reset)
 
     let shortcutSegments: [HintSegment] = [
       makeSegment(
         plain: "⌃G next",
-        rendered: "\(Terminal.ansiCyan6)⌃G\(Terminal.reset) \(Terminal.brightBlack)next\(Terminal.reset)"),
+        rendered: "\(Terminal.ansiCyan6)⌃G\(Terminal.reset) \(Terminal.dim)next\(Terminal.reset)"),
       makeSegment(
         plain: "⌃R prev",
-        rendered: "\(Terminal.ansiCyan6)⌃R\(Terminal.reset) \(Terminal.brightBlack)prev\(Terminal.reset)"),
+        rendered: "\(Terminal.ansiCyan6)⌃R\(Terminal.reset) \(Terminal.dim)prev\(Terminal.reset)"),
       makeSegment(
         plain: "Esc done",
-        rendered: "\(Terminal.ansiCyan6)Esc\(Terminal.reset) \(Terminal.brightBlack)done\(Terminal.reset)")
+        rendered: "\(Terminal.ansiCyan6)Esc\(Terminal.reset) \(Terminal.dim)done\(Terminal.reset)")
     ]
 
     let separator = "  "
     let separatorWidth = Terminal.displayWidth(of: separator)
     let availableWidth = max(0, termWidth - 2)
     let prefixWidth = Terminal.displayWidth(of: "Find: ")
-    let baseColor = state.find.regexError == nil ? Terminal.grey : Terminal.red
+    let baseColor = Terminal.dim
 
     var chosenSegments: [HintSegment] = []
     var findRender: FindFieldRenderResult?
@@ -609,19 +613,20 @@ func drawEditor(state: inout EditorState) {
 private func makeStatusLine(state: EditorState) -> (text: String, color: String) {
   if state.find.active {
     let prefix = state.focusedControl == .document ? "Find ▷ " : "Find: "
-    return ("\(prefix)\(state.find.field.text)", state.find.regexError == nil ? Terminal.grey : Terminal.red)
+    let color = state.find.regexError == nil ? Terminal.dim : Terminal.red
+    return ("\(prefix)\(state.find.field.text)", color)
   }
 
   let currentLine = state.cursorLine + 1
 
   guard state.hasSelection, let startSel = state.selectionStart, let endSel = state.selectionEnd else {
-    return ("ln \(currentLine), col \(state.cursorColumn + 1)", Terminal.grey)
+    return ("ln \(currentLine), col \(state.cursorColumn + 1)", Terminal.dim)
   }
 
   let (start, end) = state.normalizeSelection(start: startSel, end: endSel)
   let lineCount = countSelectedLines(in: state, from: start, to: end)
   let characterCount = countSelectedCharacters(in: state, from: start, to: end)
-  return ("lns \(lineCount), chars \(characterCount)", Terminal.grey)
+  return ("lns \(lineCount), chars \(characterCount)", Terminal.dim)
 }
 
 /// Counts the number of logical lines covered by the current selection.
@@ -699,7 +704,7 @@ private func makeControlHints(state: EditorState) -> (String, Int) {
   let parts = shortcuts.map { hint -> (String, Int) in
     let textLength = Terminal.displayWidth(of: hint.0) + 1 + Terminal.displayWidth(of: hint.1)
     let rendered = "\(Terminal.ansiCyan6)\(hint.0)\(Terminal.reset) "
-      + "\(Terminal.brightBlack)\(hint.1)\(Terminal.reset)"
+      + "\(Terminal.dim)\(hint.1)\(Terminal.reset)"
     return (rendered, textLength)
   }
   let separator = "  "

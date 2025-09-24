@@ -12,6 +12,8 @@ struct Terminal {
   static let hideCursor = "\(ESC)[?25l"
   static let showCursor = "\(ESC)[?25h"
   static let bold = "\(ESC)[1m"
+  static let italic = "\(ESC)[3m"
+  static let dim = "\(ESC)[2m"
   static let reset = "\(ESC)[0m"
   static let blue = "\(ESC)[34m"
   static let green = "\(ESC)[32m"
@@ -29,6 +31,8 @@ struct Terminal {
   static let ansiBlue209 = "\(ESC)[38;5;209m"
   // Selection highlight: reverse video to remain visible even when terminals disable custom colors
   static let highlight = "\(ESC)[7m"
+  static let highlightBold = "\(ESC)[7;1m"
+  static let highlightDim = "\(ESC)[2;7m"
   // Subtle scrollbar styling
   static let scrollbarBG = "\(ESC)[48;5;240m"  // dark grey background
   static let scrollbarFG = "\(ESC)[38;5;250m"  // light grey foreground for caps/dots

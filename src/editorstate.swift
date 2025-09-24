@@ -469,7 +469,7 @@ extension EditorState {
       selectionEnd = nil
     }
     selectionMode = .none
-    find = FindState()
+    find = FindState(currentIndex: 0)
     find.focus = .document
     find.lastLayout = nil
     isFindFieldDragging = false
