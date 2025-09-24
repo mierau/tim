@@ -2,7 +2,7 @@
 
 The Mac-friendly command line text editor.
 
-![Simple and straightforward](images/basics.gif)
+![basics](https://github.com/user-attachments/assets/46fd9fb5-a5b0-4fa6-8c41-336cc85bb485)
 
 ## Features
 - Straightforward editing interface.
@@ -26,8 +26,6 @@ The Mac-friendly command line text editor.
 - Open text-friendly versions of Wikipedia articles like `tim --wikipedia albert einstein`.
 - Open text formatted RSS/Atom feeds like `tim --rss www.apple.com/newsroom`.
 - Open text formatted Bluesky feeds like `tim --bluesky @blippo.plus`
-
-![Green](images/wikipedia-green.png) ![Biege](images/wikipedia-novel.png) ![Blue](images/wikipedia-ocean.png)
 
 ## Installation
 1. Ensure Xcode command line tools or a Swift 5.9+ toolchain is installed.
@@ -74,8 +72,6 @@ Option -b or --bluesky
 tim -b mierau.bsky.social
 ```
 
-![RSS](images/rss.png) ![RSS](images/rss2.png)
-
 Additional flags:
 - `tim --help` prints the available options.
 - `tim --version` shows the current release tag.
@@ -87,7 +83,8 @@ Additional flags:
 
 Find within the current buffer with `⌃F`, advance matches with `⌃G`, move backward with `⌃R`, and press `Esc` (or `⌃F` a second time) to close. After opening the prompt, pressing `⌃F` moves focus to the document so subsequent typing edits the buffer; run `⌃F` once more to exit. Surround the query with `/` characters to run a regular expression, e.g. `/^[A-Z].*/`.
 
-![Bluesky](images/bluesky.png)
+## License
+This project is available under the terms of the [MIT License](LICENSE).
 
 ## Project Layout
 - `src/app.swift` wires CLI parsing, document loading, and editor launch
@@ -111,5 +108,23 @@ Find within the current buffer with `⌃F`, advance matches with `⌃G`, move ba
 - `src/control.swift` houses small reusable UI helper structs
 - `src/textfield.swift` implements the editable field used by the find prompt and similar UI
 
-## License
-This project is available under the terms of the [MIT License](LICENSE).
+## Screenshots
+
+Use `tim` to open text-friendly Wikipedia articles by title.
+
+`tim --wikipedia albert einstein`
+![Green](images/wikipedia-green.png)
+
+---
+
+Use `tim` to open text formatted RSS/Atom feeds.
+
+`tim --rss daringfireball.net`
+![RSS](images/rss2.png)
+
+---
+
+Use `tim` to open text formatted Bluesky feeds.
+
+`tim --bluesky @panic.com`
+![Bluesky](images/bluesky.png)
