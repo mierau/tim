@@ -8,6 +8,7 @@ struct DocumentLoadResult {
   let buffer: [String]
   let filePath: String?
   let initialCursor: (line: Int, column: Int)?
+  let markDirty: Bool
 }
 
 enum DocumentLoaderError: Error {
@@ -39,7 +40,7 @@ enum DocumentLoader {
         let content = try makeTextContent(from: data)
         let buffer = makeBuffer(from: content)
         let cursor = initialCursor(for: lineNumber, buffer: buffer)
-        return DocumentLoadResult(buffer: buffer, filePath: expandedPath, initialCursor: cursor)
+        return DocumentLoadResult(buffer: buffer, filePath: expandedPath, initialCursor: cursor, markDirty: false)
       } catch let error as DocumentDataError {
         throw DocumentLoaderError.userFacing(error.messageForFile(path: expandedPath))
       } catch {
@@ -48,7 +49,7 @@ enum DocumentLoader {
     } else {
       let buffer = [""]
       let cursor = initialCursor(for: lineNumber, buffer: buffer)
-      return DocumentLoadResult(buffer: buffer, filePath: expandedPath, initialCursor: cursor)
+      return DocumentLoadResult(buffer: buffer, filePath: expandedPath, initialCursor: cursor, markDirty: true)
     }
   }
 
@@ -62,7 +63,7 @@ enum DocumentLoader {
       let content = try makeTextContent(from: data)
       let buffer = makeBuffer(from: content)
       let cursor = initialCursor(for: lineNumber, buffer: buffer)
-      return DocumentLoadResult(buffer: buffer, filePath: nil, initialCursor: cursor)
+      return DocumentLoadResult(buffer: buffer, filePath: nil, initialCursor: cursor, markDirty: true)
     } catch let error as DocumentDataError {
       throw DocumentLoaderError.userFacing(error.messageForStandardInput())
     } catch {
@@ -99,7 +100,7 @@ enum DocumentLoader {
       let buffer = makeBuffer(from: content)
       let cursor = initialCursor(for: lineNumber, buffer: buffer)
       let savePath = derivedSavePath(for: url)
-      return DocumentLoadResult(buffer: buffer, filePath: savePath, initialCursor: cursor)
+      return DocumentLoadResult(buffer: buffer, filePath: savePath, initialCursor: cursor, markDirty: true)
     } catch let error as DocumentDataError {
       throw DocumentLoaderError.userFacing(error.messageForFile(path: url.absoluteString))
     } catch {
@@ -121,7 +122,7 @@ enum DocumentLoader {
       let cwd = FileManager.default.currentDirectoryPath
       let suggestedFilename = wikipediaSuggestedFilename(for: article.title)
       let savePath = (cwd as NSString).appendingPathComponent(suggestedFilename)
-      return DocumentLoadResult(buffer: buffer, filePath: savePath, initialCursor: cursor)
+      return DocumentLoadResult(buffer: buffer, filePath: savePath, initialCursor: cursor, markDirty: true)
     } catch let error as WikipediaError {
       throw DocumentLoaderError.userFacing(error.localizedDescription)
     } catch {
@@ -174,7 +175,7 @@ enum DocumentLoader {
       let suggested = rssSuggestedFilename(title: feed.title, url: url)
       let cwd = FileManager.default.currentDirectoryPath
       let savePath = (cwd as NSString).appendingPathComponent(suggested)
-      return DocumentLoadResult(buffer: buffer, filePath: savePath, initialCursor: cursor)
+      return DocumentLoadResult(buffer: buffer, filePath: savePath, initialCursor: cursor, markDirty: true)
     } catch let error as DocumentLoaderError {
       throw error
     } catch let error as RSSParserError {
@@ -276,7 +277,7 @@ enum DocumentLoader {
       let suggested = blueskySuggestedFilename(handle: feed.handle)
       let cwd = FileManager.default.currentDirectoryPath
       let savePath = (cwd as NSString).appendingPathComponent(suggested)
-      return DocumentLoadResult(buffer: buffer, filePath: savePath, initialCursor: cursor)
+      return DocumentLoadResult(buffer: buffer, filePath: savePath, initialCursor: cursor, markDirty: true)
     } catch let error as BlueskyError {
       throw DocumentLoaderError.userFacing(error.localizedDescription)
     } catch let error as DocumentLoaderError {

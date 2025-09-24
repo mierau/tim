@@ -6,22 +6,26 @@ import Foundation
 
 enum EditorController {
   static func run() {
-    var state = EditorState()
-    state.bufferDidChange()
-    run(state: &state)
+    run(initialBuffer: [""], filePath: nil, initialCursor: nil, markDirty: true)
   }
 
-  static func run(initialBuffer: [String], filePath: String?, initialCursor: (line: Int, column: Int)? = nil) {
+  static func run(
+    initialBuffer: [String],
+    filePath: String?,
+    initialCursor: (line: Int, column: Int)? = nil,
+    markDirty: Bool = false
+  ) {
     var state = EditorState()
     state.buffer = initialBuffer
-    state.savedBuffer = initialBuffer
-    state.bufferDidChange()
+    state.savedBuffer = markDirty ? [] : initialBuffer
     state.filePath = filePath
     if let cursor = initialCursor {
       state.cursorLine = cursor.line
       state.cursorColumn = cursor.column
       state.clampCursor()
     }
+    state.bufferDidChange()
+    if markDirty { state.isDirty = true }
     run(state: &state)
   }
 

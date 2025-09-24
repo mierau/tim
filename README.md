@@ -2,27 +2,32 @@
 
 The Mac-friendly command line text editor.
 
+![Simple and straightforward](images/basics.gif)
+
 ## Features
-- Clean simple interface.
-- Select text using Mac keyboard shortcuts.
-- Copy/paste/cut support through `^C`/`^V`/`^X` (reads and writes to system clipboard).
-- Undo/redo support through `^Z`/`^Y`.
-- Documents have an edited marker when they've been edited but not saved.
-- Save new or edited documents with ctrl-s.
-- Use a mouse or trackpad to select with single, double, or triple-click selection.
-- Use a trackpad and scroll wheel to scroll long documents.
-- Proportional scrollbar you can drag to scroll around a document.
+- Straightforward editing interface.
+- Familiar macOS text navigation shortcuts.
+- Mouse support with single, double, and triple-click selection.
+- Mouse wheel support for scrolling longer documents.
+- System clipboard copy/paste/cut shortcuts `^C`/`^V`/`^X`.
+- Undo/redo shortcuts with `^Z`/`^Y`.
+- Save new or edited documents with `^S`.
+- Search with `⌃F` and optional `/regex/` search.
+- Line numbers toggle with `⌃L`.
+- Simple visual marker for documents that have unsaved changes.
+- Proportional scrollbar you can drag to scroll through a document.
 - Automatic line wrapping.
 - Indentation preservation when moving to a new line.
-- Automatic detection of binary files.
-- Status footer with live line/column counts and selection summaries.
+- Automatic avoidance of opening binary files.
+- Status footer with command hints, line/column counts, and selection summaries.
 - Looks great in with or without terminal colors.
-- Mac-like `^Q` and `^W` shortcuts to close.
-- Toggle line numbers with `⌃L`.
-- Open documents over HTTP(S).
-- Open text-friendly versions of Wikipedia articles.
-- Open RSS/Atom feeds and Bluesky profiles as readable plain text.
-- Incremental find (`⌃F`) with next/previous (`⌃G`/`⌃R`) and optional `/regex/` search.
+- Mac-like `^Q` and `^W` shortcuts to close `tim`.
+- Open documents over HTTP(S) like `tim https://mierau.me`
+- Open text-friendly versions of Wikipedia articles like `tim --wikipedia albert einstein`.
+- Open text formatted RSS/Atom feeds like `tim --rss www.apple.com/newsroom`.
+- Open text formatted Bluesky feeds like `tim --bluesky @blippo.plus`
+
+![Green](images/wikipedia-green.png) ![Biege](images/wikipedia-novel.png) ![Blue](images/wikipedia-ocean.png)
 
 ## Installation
 1. Ensure Xcode command line tools or a Swift 5.9+ toolchain is installed.
@@ -69,15 +74,20 @@ Option -b or --bluesky
 tim -b mierau.bsky.social
 ```
 
+![RSS](images/rss.png) ![RSS](images/rss2.png)
+
 Additional flags:
 - `tim --help` prints the available options.
 - `tim --version` shows the current release tag.
 - `tim -` reads buffer contents from standard input (ASCII or UTF-8 text only).
 - `tim -r <url>` downloads and formats an RSS/Atom feed.
+- `tim -w <article title>` fetches a text-friendly version of a Wikipedia article.
 - `tim -b <handle>` fetches a Bluesky profile feed by handle, DID, or profile URL.
 - Use `--` before a path that begins with `-` to treat it literally.
 
 Find within the current buffer with `⌃F`, advance matches with `⌃G`, move backward with `⌃R`, and press `Esc` (or `⌃F` a second time) to close. After opening the prompt, pressing `⌃F` moves focus to the document so subsequent typing edits the buffer; run `⌃F` once more to exit. Surround the query with `/` characters to run a regular expression, e.g. `/^[A-Z].*/`.
+
+![Bluesky](images/bluesky.png)
 
 ## Project Layout
 - `src/app.swift` wires CLI parsing, document loading, and editor launch

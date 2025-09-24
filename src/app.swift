@@ -68,7 +68,8 @@ private extension Tim {
       EditorController.run(
         initialBuffer: result.buffer,
         filePath: result.filePath,
-        initialCursor: result.initialCursor)
+        initialCursor: result.initialCursor,
+        markDirty: result.markDirty)
     } catch let error as DocumentLoaderError {
       fputs("\(error.message)\n", stderr)
       exit(1)

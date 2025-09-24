@@ -136,6 +136,8 @@ struct EditorState {
   var showLineNumbers: Bool
   var dragAutoscrollDirection: Int
   var dragSelectionPreferredColumn: Int
+  var cachedTerminalRows: Int
+  var cachedTerminalCols: Int
 
   var displayFilename: String {
     if let filePath { return URL(fileURLWithPath: filePath).lastPathComponent }
@@ -179,6 +181,8 @@ struct EditorState {
     self.showLineNumbers = false
     self.dragAutoscrollDirection = 0
     self.dragSelectionPreferredColumn = 0
+    self.cachedTerminalRows = 0
+    self.cachedTerminalCols = 0
   }
 
   mutating func setFocus(_ target: FocusTarget) {

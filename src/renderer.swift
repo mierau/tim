@@ -245,6 +245,13 @@ func drawEditor(state: inout EditorState) {
   let termRows = max(1, termSize.rows)
   let termWidth = max(1, termSize.cols)
 
+  if termRows != state.cachedTerminalRows || termWidth != state.cachedTerminalCols {
+    print(Terminal.clearScreen + Terminal.home, terminator: "")
+    state.cachedTerminalRows = termRows
+    state.cachedTerminalCols = termWidth
+    state.lastFrameLines = []
+  }
+
   let headerLines = 1
   let footerLines = 2
   let maxVisibleRows = max(0, termRows - headerLines - footerLines)
@@ -326,7 +333,7 @@ func drawEditor(state: inout EditorState) {
   let leftCount = availableWidth / 2
   let rightCount = availableWidth - leftCount
   let barCharacter = "\u{2500}"
-  let indicatorStyled = state.isDirty ? "\(Terminal.white)•\(Terminal.reset) " : ""
+  let indicatorStyled = state.isDirty ? "\(Terminal.bold)• " : ""
   let decoratedDisplay = String(repeating: " ", count: spaceAroundTitle)
     + indicatorStyled + Terminal.bold + filename + Terminal.reset
     + String(repeating: " ", count: spaceAroundTitle)
