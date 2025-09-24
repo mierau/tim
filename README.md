@@ -5,7 +5,7 @@ The Mac-friendly command line text editor.
 ![basics](https://github.com/user-attachments/assets/46fd9fb5-a5b0-4fa6-8c41-336cc85bb485)
 
 ## Features
-- Straightforward editing interface.
+- Straightforward macOS editing experience from the command line.
 - Familiar macOS text navigation shortcuts.
 - Mouse support with single, double, and triple-click selection.
 - Mouse wheel support for scrolling longer documents.
